@@ -1033,19 +1033,22 @@ export class GameScene extends Phaser.Scene {
 
     if (this.time.now < this.kitCooldownEnd) return;
 
+    // 已激活的套件不允许重复选择
+    if (key === 'sniper' && (this.sniperKitPending || this.sniperKitActive)) {
+      this.showKitHint('【狙击套件】已激活，无法重复选择', '#ff4444');
+      return;
+    }
+    if (key === 'charge' && this.activeKit === 'charge' && this.time.now < this.kitEffectEndTime) {
+      this.showKitHint('【冲锋套件】已激活，无法重复选择', '#ff4444');
+      return;
+    }
+
     // 狙击套件：挂起，等下次大招蓄力触发
     if (key === 'sniper') {
       this.sniperKitPending = true;
       this.activeKit = 'sniper';
       this.cameras.main.flash(200, 255, 0, 0);
-      const t = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50,
-        '【狙击套件】待命中 — 下次大招蓄力触发', {
-          fontFamily: 'monospace', fontSize: '18px', color: '#ff0000', fontStyle: 'bold'
-        }).setOrigin(0.5).setDepth(200).setScrollFactor(0);
-      this.tweens.add({
-        targets: t, alpha: 0, y: t.y - 40, duration: 2000,
-        onComplete: () => t.destroy()
-      });
+      this.showKitHint('【狙击套件】待命中 — 下次大招蓄力触发', '#ff0000');
       return;
     }
 
@@ -1056,13 +1059,17 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.flash(200, 255, 200, 0);
 
+    this.showKitHint(`【${kit.name}套件】已激活！`, '#ffcc00');
+  }
+
+  private showKitHint(text: string, color: string) {
     const t = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50,
-      `【${kit.name}套件】已激活！`, {
-        fontFamily: 'monospace', fontSize: '20px', color: '#ffcc00', fontStyle: 'bold'
+      text, {
+        fontFamily: 'monospace', fontSize: '18px', color, fontStyle: 'bold'
       }).setOrigin(0.5).setDepth(200).setScrollFactor(0);
 
     this.tweens.add({
-      targets: t, alpha: 0, y: t.y - 40, duration: 1500,
+      targets: t, alpha: 0, y: t.y - 40, duration: 2000,
       onComplete: () => t.destroy()
     });
   }
