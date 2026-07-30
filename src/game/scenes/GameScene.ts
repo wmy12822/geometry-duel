@@ -2054,8 +2054,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawTrajectory(angle: number, progress: number) {
-    const length = 150 + progress * 850;
-    
+    // 动态长度：至少延伸到敌人位置，确保远距离不消失
+    let enemyDist = 600;
+    if (this.enemy && this.enemy.active) {
+      enemyDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.enemy.x, this.enemy.y);
+    }
+    const length = Math.max(150 + progress * 850, enemyDist + 120);
+
     this.trajectoryUI.x = this.player.x;
     this.trajectoryUI.y = this.player.y;
     this.trajectoryUI.rotation = angle;
@@ -2065,11 +2070,11 @@ export class GameScene extends Phaser.Scene {
       this.trajectoryUI.clear();
       this.trajectoryUI.lineStyle(2, COLORS.ultimate, 0.4 + progress * 0.4);
       this.trajectoryUI.beginPath();
-      
+
       const dashLength = 15;
       const gapLength = 15;
       let dist = 30;
-      
+
       while (dist < length) {
         this.trajectoryUI.moveTo(dist, 0);
         dist += dashLength;
@@ -2082,23 +2087,25 @@ export class GameScene extends Phaser.Scene {
 
   private drawEnemyTrajectory(angle: number, progress: number) {
     if (!this.enemy || !this.enemy.active) return;
-    
-    const length = 150 + progress * 850;
-    
+
+    // 动态长度：至少延伸到玩家位置
+    const playerDist = Phaser.Math.Distance.Between(this.enemy.x, this.enemy.y, this.player.x, this.player.y);
+    const length = Math.max(150 + progress * 850, playerDist + 120);
+
     this.enemyTrajectoryUI.x = this.enemy.x;
     this.enemyTrajectoryUI.y = this.enemy.y;
     this.enemyTrajectoryUI.rotation = angle;
-    
+
     if (Math.abs(this.lastEnemyTrajectoryLength - length) > 2) {
       this.lastEnemyTrajectoryLength = length;
       this.enemyTrajectoryUI.clear();
       this.enemyTrajectoryUI.lineStyle(2, COLORS.enemy, 0.4 + progress * 0.4);
       this.enemyTrajectoryUI.beginPath();
-      
+
       const dashLength = 15;
       const gapLength = 15;
       let dist = 30;
-      
+
       while (dist < length) {
         this.enemyTrajectoryUI.moveTo(dist, 0);
         dist += dashLength;
