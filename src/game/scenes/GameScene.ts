@@ -1533,8 +1533,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     // 视觉上的平滑持续自转
-    // 角色自转：狙击套件时按慢放比例同步减速
-    const rotScale = this.sniperKitActive ? this.currentSniperTimeScale : 1.0;
+    // 角色自转：狙击套件时随 timeScale 线性减速（delta 本身已受 timeScale 影响）
+    const rotScale = this.sniperKitActive ? this.time.timeScale : 1.0;
     if (this.player && this.player.active) {
       this.player.rotation += 0.08 * (delta / 16) * rotScale;
     }
@@ -1818,14 +1818,14 @@ export class GameScene extends Phaser.Scene {
     const maxCharge = SNIPER_STAGE3_TIME;
     if (chargeDuration < minCharge) {
       // 还没到最低发射时间，保持正常速度
-      this.currentSniperTimeScale += (1.0 - this.currentSniperTimeScale) * 0.15;
+      this.currentSniperTimeScale += (1.0 - this.currentSniperTimeScale) * 0.2;
     } else {
-      // 从 minCharge 到 maxCharge，timeScale 从 1.0 平滑降到 0.05
+      // 从 minCharge 到 maxCharge，timeScale 从 1.0 平滑降到 0.012（子弹几乎静止）
       const t = Math.min((chargeDuration - minCharge) / (maxCharge - minCharge), 1.0);
-      // 使用 easeOutQuad 让初期慢放更平滑
-      const eased = 1 - (1 - t) * (1 - t);
-      const target = 1.0 - eased * 0.95;
-      this.currentSniperTimeScale += (target - this.currentSniperTimeScale) * 0.08;
+      // 使用 easeOutCubic 让中期慢放更果断，末尾极慢
+      const eased = 1 - Math.pow(1 - t, 3);
+      const target = 1.0 - eased * 0.988; // 最低 ≈ 0.012
+      this.currentSniperTimeScale += (target - this.currentSniperTimeScale) * 0.15;
     }
     this.setSniperTimeScale(this.currentSniperTimeScale);
   }
@@ -1887,6 +1887,9 @@ export class GameScene extends Phaser.Scene {
   private enterSniperStage3() {
     this.sniperKitStage = 3;
     this.sniperSpeedMult = SNIPER_SPEED_MULT_STAGE3;
+    // 直接推到底：子弹、旋转、物理近乎冻结
+    this.currentSniperTimeScale = 0.015;
+    this.setSniperTimeScale(0.015);
     // 保持二段暗角，热成像遮罩平滑淡入
     this.thermalScopeSprite.setVisible(true).setAlpha(0);
     this.enemyGlowSprite.setVisible(true);
