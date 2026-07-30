@@ -952,6 +952,27 @@ export class StartScene extends Phaser.Scene {
       this.panelContentGroup.addMultiple([t, b]);
       y += 72;
     });
+
+    // 实战教学入口按钮
+    const tutorialBtn = this.add.text(755, y + 24, '[ 进入实战教学 ]', {
+      fontFamily: FONT_IMPACT, fontSize: '28px', color: '#00ff88', fontStyle: 'italic bold'
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true }).setDepth(52);
+    tutorialBtn.setShadow(0, 0, '#00ff88', 14, true, true);
+    tutorialBtn.on('pointerover', () => {
+      tutorialBtn.setScale(1.12);
+      tutorialBtn.setShadow(0, 0, '#00ff88', 26, true, true);
+    });
+    tutorialBtn.on('pointerout', () => {
+      tutorialBtn.setScale(1);
+      tutorialBtn.setShadow(0, 0, '#00ff88', 14, true, true);
+    });
+    tutorialBtn.on('pointerdown', () => {
+      this.closePanel();
+      this.time.delayedCall(350, () => {
+        this.scene.start('GameScene', { mode: 'tutorial' });
+      });
+    });
+    this.panelContentGroup.add(tutorialBtn);
   }
 
   // 模式选择面板内容

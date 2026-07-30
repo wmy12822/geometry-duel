@@ -306,7 +306,21 @@ export class GameScene extends Phaser.Scene {
   private modInfiniteParry = false; // 无限弹反：无冷却
   private modPerfectParry = false; // 无限完美弹反：必定触发反弹
   // 模式
-  private gameMode: 'standard' | 'endless' | 'test' = 'standard';
+  private gameMode: 'standard' | 'endless' | 'test' | 'tutorial' = 'standard';
+  // 教程系统
+  private tutorialStep = 0; // 0=非教程, 1-7=步骤
+  private tutorialStepDone = false;
+  private tutorialStepDoneTime = 0;
+  private tutorialHoldTimer = 0; // 长按计时器
+  private tutorialOverlayGfx!: Phaser.GameObjects.Graphics;
+  private tutorialHighlightGfx!: Phaser.GameObjects.Graphics;
+  private tutorialTextBg!: Phaser.GameObjects.Graphics;
+  private tutorialTitleText!: Phaser.GameObjects.Text;
+  private tutorialBodyText!: Phaser.GameObjects.Text;
+  private tutorialDotsGfx!: Phaser.GameObjects.Graphics;
+  private tutorialSkipBtn!: Phaser.GameObjects.Text;
+  private tutorialParryBullet: Phaser.Physics.Arcade.Sprite | null = null;
+  private tutorialParrySlowActive = false;
   // 操控模式
   private controlMode: string = 'mobile';
   // 无尽模式
@@ -357,6 +371,18 @@ export class GameScene extends Phaser.Scene {
     }
     // 模式
     this.gameMode = (data && data.mode) || 'standard';
+    if (this.gameMode === 'tutorial') {
+      this.tutorialStep = (data && data.tutorialStep) || 1;
+      this.tutorialStepDone = false;
+      this.tutorialStepDoneTime = 0;
+      this.tutorialHoldTimer = 0;
+      this.tutorialParryBullet = null;
+      this.tutorialParrySlowActive = false;
+      this.diffHpMult = 1.0;
+      this.diffSpeedMult = 0.6;
+      this.diffFireRateMult = 1.0;
+      this.diffEnableEnemySkills = false;
+    }
     if (this.gameMode === 'endless') {
       this.waveNumber = 0;
       this.waveState = 'fighting';
@@ -453,7 +479,7 @@ export class GameScene extends Phaser.Scene {
     // 敌人光晕精灵（初始隐藏，置于敌人下层）
     this.enemyGlowSprite = this.add.sprite(0, 0, 'enemy_glow_tex')
       .setDepth(1.5).setVisible(false).setAlpha(0.8).setScale(2.5);
-    this.enemyHp = ENEMY_HP * this.diffHpMult;
+    this.enemyHp = this.gameMode === 'tutorial' ? 9999 : ENEMY_HP * this.diffHpMult;
     this.lastFired = 0;
     this.lastEnemyFired = 0;
     this.isCharging = false;
@@ -505,6 +531,7 @@ export class GameScene extends Phaser.Scene {
     this.player.setMaxVelocity(PLAYER_SPEED, PLAYER_SPEED);
 
     // 开局保护：给予玩家 1.5 秒无敌时间，并附带闪烁视觉效果
+    // 教程模式：全程无敌
     this.isPlayerInvincible = true;
     const spawnInvincibleTween = this.tweens.add({
       targets: this.player,
@@ -513,13 +540,19 @@ export class GameScene extends Phaser.Scene {
       yoyo: true,
       repeat: -1
     });
-    this.time.delayedCall(1500, () => {
-      this.isPlayerInvincible = false;
+    if (this.gameMode === 'tutorial') {
+      // 教程模式永久无敌，不做闪烁
       spawnInvincibleTween.stop();
-      if (this.player && this.player.active) {
-        this.player.setAlpha(1);
-      }
-    });
+      this.player.setAlpha(1);
+    } else {
+      this.time.delayedCall(1500, () => {
+        this.isPlayerInvincible = false;
+        spawnInvincibleTween.stop();
+        if (this.player && this.player.active) {
+          this.player.setAlpha(1);
+        }
+      });
+    }
 
     // 敌人 NPC / 无尽模式小兵组
     if (this.gameMode === 'endless') {
@@ -1031,7 +1064,8 @@ export class GameScene extends Phaser.Scene {
     const kit = this.WEAPON_KITS.find(k => k.key === key);
     if (!kit) return;
 
-    if (this.time.now < this.kitCooldownEnd) return;
+    if (this.time.now < this.kitCooldownEnd && this.gameMode !== 'tutorial') return;
+    this.emitTutorialAction('weapon-kit');
 
     // 已激活的套件不允许重复选择
     if (key === 'sniper' && (this.sniperKitPending || this.sniperKitActive)) {
@@ -1072,6 +1106,315 @@ export class GameScene extends Phaser.Scene {
       targets: t, alpha: 0, y: t.y - 40, duration: 2000,
       onComplete: () => t.destroy()
     });
+  }
+
+  private emitTutorialAction(action: string) {
+    if (this.gameMode === 'tutorial') {
+      this.events.emit('tutorial-action', action);
+    }
+  }
+
+  // ====== 教程系统核心方法 ======
+
+  private readonly TUTORIAL_STEPS = [
+    { id: 'normal-tap', name: '普攻·点按', desc: '点按 Z 键 或 鼠标左键\n射出一发子弹', event: 'normal-attack', btn: 'z' as const },
+    { id: 'normal-hold', name: '普攻·长按', desc: '按住 Z 键 或 鼠标左键\n持续连射 (1秒)', event: 'normal-hold', btn: 'z' as const, hold: true },
+    { id: 'ultimate', name: '致命大招', desc: '按住 X 键 或 鼠标右键 蓄力\n蓄满后松开释放', event: 'ultimate', btn: 'x' as const },
+    { id: 'dash', name: '闪避冲刺', desc: '按下 C 键 或 空格键\n高速位移闪避', event: 'dash', btn: 'c' as const },
+    { id: 'parry', name: '近战弹反', desc: '敌人将发射大招\n子弹接近时 按 V 键 弹反!', event: 'parry', btn: 'v' as const, parry: true },
+    { id: 'wheel-open', name: '武器轮盘·打开', desc: '长按左下角武器按钮\n(约0.5秒)打开轮盘', event: 'wheel-open', btn: 'w' as const },
+    { id: 'wheel-select', name: '武器轮盘·选择', desc: '滑动选中任意套件后松手\n激活武器套件效果', event: 'weapon-kit', btn: 'w' as const },
+  ];
+
+  private createTutorialUI() {
+    // 暗幕叠加层
+    this.tutorialOverlayGfx = this.add.graphics().setDepth(500).setScrollFactor(0);
+    // 高亮指示
+    this.tutorialHighlightGfx = this.add.graphics().setDepth(501).setScrollFactor(0);
+    // 顶栏背景
+    this.tutorialTextBg = this.add.graphics().setDepth(501).setScrollFactor(0);
+    // 标题
+    this.tutorialTitleText = this.add.text(GAME_WIDTH / 2, 24, '', {
+      fontFamily: '"Impact", "Arial Black", sans-serif', fontSize: '26px',
+      color: '#00e5ff', fontStyle: 'italic bold'
+    }).setOrigin(0.5, 0).setDepth(502).setScrollFactor(0);
+    this.tutorialTitleText.setShadow(0, 0, '#00e5ff', 10, true, true);
+    // 说明文字
+    this.tutorialBodyText = this.add.text(GAME_WIDTH / 2, 62, '', {
+      fontFamily: 'monospace', fontSize: '16px', color: '#cccccc',
+      align: 'center', lineSpacing: 4
+    }).setOrigin(0.5, 0).setDepth(502).setScrollFactor(0);
+    // 进度点
+    this.tutorialDotsGfx = this.add.graphics().setDepth(502).setScrollFactor(0);
+    // 跳过按钮
+    this.tutorialSkipBtn = this.add.text(GAME_WIDTH - 20, 20, '[ 跳过教程 ]', {
+      fontFamily: '"Impact", "Arial Black", sans-serif', fontSize: '16px',
+      color: '#666666', fontStyle: 'italic'
+    }).setOrigin(1, 0).setDepth(502).setScrollFactor(0).setInteractive({ useHandCursor: true });
+    this.tutorialSkipBtn.on('pointerover', () => this.tutorialSkipBtn.setColor('#ff4444'));
+    this.tutorialSkipBtn.on('pointerout', () => this.tutorialSkipBtn.setColor('#666666'));
+    this.tutorialSkipBtn.on('pointerdown', () => this.endTutorial());
+  }
+
+  private updateTutorial(time: number, _delta: number) {
+    // 首次进入时创建 UI
+    if (!this.tutorialOverlayGfx) {
+      this.createTutorialUI();
+    }
+
+    const step = this.TUTORIAL_STEPS[this.tutorialStep - 1];
+    if (!step) { this.endTutorial(); return; }
+
+    // 步骤 1: 点按检测
+    if (step.id === 'normal-tap') {
+      this.events.once('tutorial-action', (action: string) => {
+        if (action === 'normal-attack') this.tutorialStepDone = true;
+      });
+    }
+
+    // 步骤 2: 长按检测 (isFiringNormal 持续 1 秒)
+    if (step.id === 'normal-hold') {
+      if (this.isFiringNormal) {
+        this.tutorialHoldTimer += _delta;
+        if (this.tutorialHoldTimer >= 1000) {
+          this.tutorialStepDone = true;
+        }
+      } else {
+        this.tutorialHoldTimer = 0;
+      }
+    }
+
+    // 步骤 3: 大招检测
+    if (step.id === 'ultimate') {
+      this.events.once('tutorial-action', (action: string) => {
+        if (action === 'ultimate') this.tutorialStepDone = true;
+      });
+    }
+
+    // 步骤 4: 闪避检测
+    if (step.id === 'dash') {
+      this.events.once('tutorial-action', (action: string) => {
+        if (action === 'dash') this.tutorialStepDone = true;
+      });
+    }
+
+    // 步骤 5: 弹反检测 + 发射教学弹 + 慢放
+    if (step.id === 'parry') {
+      // 发射教学用慢速必杀技
+      if (!this.tutorialParryBullet || !this.tutorialParryBullet.active) {
+        this.fireTutorialParryProjectile();
+      }
+      // 检测弹反弹距离 → 慢放
+      this.checkTutorialParryProximity(time);
+      this.events.once('tutorial-action', (action: string) => {
+        if (action === 'parry') {
+          this.tutorialParrySlowActive = false;
+          this.setSniperTimeScale(1);
+          this.tutorialStepDone = true;
+        }
+      });
+    }
+
+    // 步骤 6: 武器轮盘打开检测
+    if (step.id === 'wheel-open') {
+      if (this.weaponWheelVisible) {
+        this.tutorialStepDone = true;
+      }
+    }
+
+    // 步骤 7: 套件选择检测
+    if (step.id === 'wheel-select') {
+      this.events.once('tutorial-action', (action: string) => {
+        if (action === 'weapon-kit') this.tutorialStepDone = true;
+      });
+    }
+
+    // 步骤完成 → 延迟推进
+    if (this.tutorialStepDone) {
+      if (this.tutorialStepDoneTime === 0) this.tutorialStepDoneTime = time;
+      if (time - this.tutorialStepDoneTime > 800) {
+        this.advanceTutorialStep();
+      }
+    }
+  }
+
+  private fireTutorialParryProjectile() {
+    if (!this.enemy || !this.enemy.active) return;
+    const angle = Phaser.Math.Angle.Between(this.enemy.x, this.enemy.y, this.player.x, this.player.y);
+    const bullet = this.enemyUltimates.get(this.enemy.x, this.enemy.y) as Phaser.Physics.Arcade.Sprite | null;
+    if (!bullet) return;
+    bullet.setActive(true).setVisible(true);
+    bullet.body!.enable = true;
+    bullet.setPosition(this.enemy.x, this.enemy.y);
+    const speed = ENEMY_ULTIMATE_SPEED * 0.35; // 慢速弹
+    (bullet.body! as Phaser.Physics.Arcade.Body).setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+    bullet.setData('tutorialParry', true);
+    this.tutorialParryBullet = bullet;
+    this.tutorialParrySlowActive = false;
+  }
+
+  private checkTutorialParryProximity(_time: number) {
+    if (!this.tutorialParryBullet || !this.tutorialParryBullet.active || !this.player) return;
+    const dist = Phaser.Math.Distance.Between(
+      this.tutorialParryBullet.x, this.tutorialParryBullet.y,
+      this.player.x, this.player.y
+    );
+    if (dist <= 150 && !this.tutorialParrySlowActive) {
+      // 进入弹反范围 → 慢放
+      this.tutorialParrySlowActive = true;
+      this.time.timeScale = 0.15;
+      this.physics.world.timeScale = 0.15;
+    } else if (dist > 250 && this.tutorialParrySlowActive) {
+      // 飞过 → 恢复正常，重新发射
+      this.tutorialParrySlowActive = false;
+      this.time.timeScale = 1;
+      this.physics.world.timeScale = 1;
+      if (this.tutorialParryBullet) { this.tutorialParryBullet.setActive(false); }
+      this.tutorialParryBullet = null;
+    }
+  }
+
+  private advanceTutorialStep() {
+    this.tutorialStepDone = false;
+    this.tutorialStepDoneTime = 0;
+    this.tutorialHoldTimer = 0;
+    this.tutorialStep++;
+    if (this.tutorialParrySlowActive) {
+      this.tutorialParrySlowActive = false;
+      this.setSniperTimeScale(1);
+    }
+    if (this.tutorialParryBullet) {
+      this.tutorialParryBullet.setActive(false);
+      this.tutorialParryBullet = null;
+    }
+    if (this.tutorialStep > 7) {
+      this.endTutorial();
+    } else {
+      this.showKitHint(
+        `【${this.TUTORIAL_STEPS[this.tutorialStep - 1].name}】`,
+        '#00ff88'
+      );
+      this.tutorialStepDoneTime = this.time.now;
+    }
+  }
+
+  private endTutorial() {
+    this.tutorialStep = 0;
+    this.tutorialParrySlowActive = false;
+    this.setSniperTimeScale(1);
+    if (this.tutorialParryBullet) {
+      this.tutorialParryBullet.setActive(false);
+      this.tutorialParryBullet = null;
+    }
+    // 清除教程 UI
+    this.tutorialOverlayGfx?.destroy();
+    this.tutorialHighlightGfx?.destroy();
+    this.tutorialTextBg?.destroy();
+    this.tutorialTitleText?.destroy();
+    this.tutorialBodyText?.destroy();
+    this.tutorialDotsGfx?.destroy();
+    this.tutorialSkipBtn?.destroy();
+    this.isPlayerInvincible = false;
+    this.gameMode = 'standard';
+    // 恢复敌人
+    if (this.enemy && this.enemy.active) {
+      this.enemyHp = ENEMY_HP;
+      this.enemy.setMaxVelocity(ENEMY_SPEED, ENEMY_SPEED);
+    }
+    this.showKitHint('训练完成！开始实战吧', '#00ff88');
+  }
+
+  private drawTutorialOverlay() {
+    const g = this.tutorialOverlayGfx;
+    g.clear();
+    const stepIdx = this.tutorialStep - 1;
+    const step = this.TUTORIAL_STEPS[stepIdx];
+    if (!step) return;
+
+    const btnPos = this.getTutorialHighlightPos(step.btn);
+    const r = step.id === 'wheel-open' || step.id === 'wheel-select' ? 36 : 42;
+    const pad = 8;
+    const wx = btnPos.x - r - pad;
+    const wy = btnPos.y - r - pad;
+    const ww = (r + pad) * 2;
+    const wh = (r + pad) * 2;
+
+    // 暗幕 + 矩形镂空
+    const alpha = 0.55;
+    g.fillStyle(0x000000, alpha);
+    // 上
+    g.fillRect(0, 0, GAME_WIDTH, Math.max(wy, 0));
+    // 下
+    g.fillRect(0, wy + wh, GAME_WIDTH, GAME_HEIGHT - wy - wh);
+    // 左
+    g.fillRect(0, wy, wx, wh);
+    // 右
+    g.fillRect(wx + ww, wy, GAME_WIDTH - wx - ww, wh);
+
+    // 阶段 5 (弹反) → 敌人区域也高亮
+    if (step.id === 'parry' && this.enemy && this.enemy.active) {
+      const er = 36;
+      const epad = 10;
+      g.fillStyle(0x000000, alpha - 0.1);
+      g.fillCircle(this.enemy.x, this.enemy.y, er + epad);
+    }
+
+    // 顶部说明栏
+    this.tutorialTextBg.clear();
+    this.tutorialTextBg.fillStyle(0x0a0a14, 0.92);
+    this.tutorialTextBg.fillRoundedRect(GAME_WIDTH / 2 - 200, 8, 400, 100, 8);
+    this.tutorialTextBg.lineStyle(2, 0x00e5ff, 0.7);
+    this.tutorialTextBg.strokeRoundedRect(GAME_WIDTH / 2 - 200, 8, 400, 100, 8);
+
+    // 标题和说明
+    this.tutorialTitleText.setText(`第 ${this.tutorialStep} 步 / 7  —  ${step.name}`);
+    this.tutorialBodyText.setText(step.desc +
+      (step.id === 'parry' && this.tutorialParrySlowActive ? '\n⚠ 子弹接近! 快按 V!' :
+       step.id === 'parry' ? '\n观察敌人发射的红色大招弹' : ''));
+
+    // 进度点
+    this.tutorialDotsGfx.clear();
+    const dotY = GAME_HEIGHT - 30;
+    const dotSpacing = 20;
+    const startX = GAME_WIDTH / 2 - (6 * dotSpacing) / 2;
+    for (let i = 0; i < 7; i++) {
+      const dx = startX + i * dotSpacing;
+      if (i < stepIdx) {
+        this.tutorialDotsGfx.fillStyle(0x00ff88, 1);
+      } else if (i === stepIdx) {
+        this.tutorialDotsGfx.fillStyle(0x00e5ff, 1);
+      } else {
+        this.tutorialDotsGfx.fillStyle(0x333344, 0.5);
+      }
+      this.tutorialDotsGfx.fillCircle(dx, dotY, 5);
+    }
+
+    // 镂空区域脉冲边框
+    this.tutorialHighlightGfx.clear();
+    const pulseAlpha = 0.5 + Math.sin(this.time.now * 0.004) * 0.4;
+    const pulseColor = step.id === 'parry' && this.tutorialParrySlowActive ? 0xff3333 : 0x00e5ff;
+    this.tutorialHighlightGfx.lineStyle(3, pulseColor, pulseAlpha);
+    this.tutorialHighlightGfx.strokeRect(wx, wy, ww, wh);
+    if ((this.tutorialHighlightGfx as any).postFX) {
+      try { (this.tutorialHighlightGfx as any).postFX.addGlow(pulseColor, 3, 0, false, 0.1, 8); } catch {}
+    }
+  }
+
+  private getTutorialHighlightPos(btn: string): { x: number; y: number } {
+    const kl = this.keyLayout;
+    switch (btn) {
+      case 'z': return { x: kl.z.x, y: kl.z.y };
+      case 'x': return { x: kl.x.x, y: kl.x.y };
+      case 'c': return { x: kl.c.x, y: kl.c.y };
+      case 'v': return { x: kl.v.x, y: kl.v.y };
+      case 'w': return { x: kl.w.x, y: kl.w.y };
+      default: return { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 };
+    }
+  }
+
+  private setSniperTimeScale(scale: number) {
+    this.time.timeScale = scale;
+    this.physics.world.timeScale = scale;
   }
 
   private updateWeaponSystem(time: number) {
@@ -1545,6 +1888,14 @@ export class GameScene extends Phaser.Scene {
   update(time: number, delta: number) {
     if (this.gameOver) return;
 
+    // ====== 教程系统 ======
+    if (this.gameMode === 'tutorial' && this.tutorialStep > 0) {
+      this.updateTutorial(time, delta);
+      if (this.tutorialStep > 0) {
+        this.drawTutorialOverlay();
+      }
+    }
+
     this.updateWeaponSystem(time);
     this.updateKitVisuals(time, delta);
 
@@ -1566,6 +1917,10 @@ export class GameScene extends Phaser.Scene {
 
     // 暂停
     if (this.esc && Phaser.Input.Keyboard.JustDown(this.esc)) {
+      if (this.gameMode === 'tutorial') {
+        this.endTutorial();
+        return;
+      }
       this.pauseGame();
       return;
     }
@@ -2333,7 +2688,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isEnemyKnockedBack) return;
 
     // 测试模式：敌人不移动
-    if (this.gameMode === 'test') {
+    if (this.gameMode === 'test' || this.gameMode === 'tutorial') {
       this.enemy.setAcceleration(0, 0);
       this.enemy.setVelocity(0, 0);
       return;
@@ -2522,6 +2877,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private fireNormal() {
+    this.emitTutorialAction('normal-attack');
     let angle = this.playerAimAngle;
     // 冲锋套件：子弹散布
     if (this.activeKit === 'charge' && this.time.now < this.kitEffectEndTime) {
@@ -2543,6 +2899,7 @@ export class GameScene extends Phaser.Scene {
   }
   
   private fireUltimate(speedMult = 1.0) {
+    this.emitTutorialAction('ultimate');
     let angle = this.playerAimAngle;
     const bullet = this.ultimates.get(this.player.x, this.player.y) as Phaser.Physics.Arcade.Sprite | null;
     if (!bullet) return;
@@ -2895,6 +3252,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private meleeAttack() {
+    this.emitTutorialAction('melee');
     // 简单的冷却或僵直限制，防止疯狂连按，暂借用普攻禁用的状态
     if (this.isNormalAttackDisabled) return;
     
@@ -3328,6 +3686,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    this.emitTutorialAction('parry');
     this.isParrying = true;
     this.parryStartTime = this.time.now;
     this.parrySuccess = false;
@@ -3968,6 +4327,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private defeatEnemy() {
+    if (this.gameMode === 'tutorial') { this.enemyHp = 9999; return; }
     // 无尽模式：不清除 gameOver，让玩家继续清剩余小兵
     // gameOver 由 showSkillSelection 设置
     if (this.gameMode !== 'endless') {
@@ -4303,6 +4663,7 @@ export class GameScene extends Phaser.Scene {
   private dash() {
     const dashCooldown = DASH_COOLDOWN * (1 - (this.skillBuffs.dashCd || 0) * 0.15);
     if (this.time.now - this.lastDashTime < dashCooldown || this.isDashing || this.gameOver || !this.player || !this.player.active) return;
+    this.emitTutorialAction('dash');
     
     if (this.comboDashValid) {
       this.comboDashCount++;
