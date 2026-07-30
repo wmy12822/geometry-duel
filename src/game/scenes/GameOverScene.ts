@@ -85,13 +85,17 @@ export class GameOverScene extends Phaser.Scene {
 
   private drawGrid() {
     const g = this.add.graphics();
-    g.lineStyle(1, COLORS.grid, 1);
     const step = 40;
+    // 极淡连接线
+    g.lineStyle(0.5, 0x101028, 0.4);
+    for (let x = 0; x <= GAME_WIDTH; x += step) g.lineBetween(x, 0, x, GAME_HEIGHT);
+    for (let y = 0; y <= GAME_HEIGHT; y += step) g.lineBetween(0, y, GAME_WIDTH, y);
+    // 交点微光
+    g.fillStyle(0x202050, 0.35);
     for (let x = 0; x <= GAME_WIDTH; x += step) {
-      g.lineBetween(x, 0, x, GAME_HEIGHT);
-    }
-    for (let y = 0; y <= GAME_HEIGHT; y += step) {
-      g.lineBetween(0, y, GAME_WIDTH, y);
+      for (let y = 0; y <= GAME_HEIGHT; y += step) {
+        g.fillCircle(x, y, 1.5);
+      }
     }
   }
 }

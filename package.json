@@ -9,10 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "miaoda-sc-plugin": "^1.0.63",
     "phaser": "^3.90.0",
     "phaser3-rex-plugins": "^1.80.17",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "tailwindcss-animate": "^1.0.7",
+    "vite-plugin-svgr": "^5.2.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.10",

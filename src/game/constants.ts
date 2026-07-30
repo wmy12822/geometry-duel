@@ -83,6 +83,8 @@ export const COLORS = {
   ultimate: 0xff3333, // 必杀技红色
   enemy_bullet: 0xff3333, // 敌人红色子弹
   white: 0xffffff,
-  grid: 0xe5e5e5, // 浅灰网格
+  grid: 0x1a1a2e, // 网格点阵色
+  grid_dot: 0x2a2a4a, // 网格交点
+  grid_bg: 0x0a0a14, // 深色底
   black: 0x000000, // 纯黑色文字及边框
 };

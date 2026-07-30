@@ -85,10 +85,26 @@ export class BootScene extends Phaser.Scene {
     g.fillRect(0, 0, 128, 4); // 长128，宽4的细长矩形
     g.generateTexture('ult_line', 128, 4);
 
-    // 网格背景
+    // 网格背景 — 蓝图点阵风格：暗底 + 微光十字交点
     g.clear();
-    g.lineStyle(1, COLORS.grid, 1);
-    g.strokeRect(0, 0, 40, 40);
+    // 深色底
+    g.fillStyle(0x0a0a14, 0.4);
+    g.fillRect(0, 0, 40, 40);
+    // 极淡的十字准线（短线，不到边界，营造蓝图/雷达屏质感）
+    g.lineStyle(0.6, 0x1a1a3e, 0.45);
+    g.lineBetween(20, 4, 20, 16);   // 上半竖线
+    g.lineBetween(20, 24, 20, 36);  // 下半竖线
+    g.lineBetween(4, 20, 16, 20);   // 左半横线
+    g.lineBetween(24, 20, 36, 20);  // 右半横线
+    // 中心微光点
+    g.fillStyle(0x3a3a6e, 0.6);
+    g.fillCircle(20, 20, 1.8);
+    // 四角极小辅助点
+    g.fillStyle(0x1a1a3e, 0.25);
+    g.fillCircle(0, 0, 1.0);
+    g.fillCircle(40, 0, 1.0);
+    g.fillCircle(0, 40, 1.0);
+    g.fillCircle(40, 40, 1.0);
     g.generateTexture('grid_tex', 40, 40);
 
     // 武器轮盘按钮 - 圆形，内部有十字准星图案
