@@ -247,6 +247,7 @@ export class GameScene extends Phaser.Scene {
   private kitCooldownEnd = 0;
   private weaponCdText!: Phaser.GameObjects.Text;
   private smgSprite!: Phaser.GameObjects.Sprite;
+  private sniperSprite!: Phaser.GameObjects.Sprite; // AX50 狙击步枪手持
   private screenEdgeGfx!: Phaser.GameObjects.Graphics;
   private screenOverlayGfx!: Phaser.GameObjects.Graphics;
   private flameEmitters: Phaser.GameObjects.Particles.ParticleEmitter[] = [];
@@ -930,6 +931,10 @@ export class GameScene extends Phaser.Scene {
     this.smgSprite = this.add.sprite(0, 0, 'wpn_charge')
       .setDepth(3).setVisible(false).setScale(1.5);
 
+    // AX50 狙击步枪手持精灵（隐藏）
+    this.sniperSprite = this.add.sprite(0, 0, 'wpn_ax50')
+      .setDepth(3).setVisible(false).setScale(1.6);
+
     // 冷却文本
     this.weaponCdText = this.add.text(bx, by + 32, '', {
       fontFamily: 'monospace', fontSize: '11px', color: '#ffcc00', align: 'center'
@@ -1162,6 +1167,8 @@ export class GameScene extends Phaser.Scene {
 
   private updateKitVisuals(time: number, delta: number) {
     const kitActive = this.activeKit === 'charge' && time < this.kitEffectEndTime;
+    const sniperShow = (this.activeKit === 'sniper' && this.sniperKitPending && !this.isCharging)
+      || (this.sniperKitActive);
 
     // SMG 手持武器显示
     if (kitActive && this.player && this.player.active) {
@@ -1178,6 +1185,30 @@ export class GameScene extends Phaser.Scene {
       this.smgSprite.setTint(this.isFiringNormal ? 0xffff88 : 0xffffff);
     } else {
       this.smgSprite.setVisible(false);
+    }
+
+    // AX50 狙击步枪手持显示
+    if (sniperShow && this.player && this.player.active) {
+      this.sniperSprite.setVisible(true);
+      const offsetDist = 38; // 狙击枪更长，往外多放一点
+      const sniperJitter = this.sniperKitActive ? (Math.random() - 0.5) * 1.5 : 0; // 蓄力时微颤
+      this.sniperSprite.setPosition(
+        this.player.x + Math.cos(this.playerAimAngle) * offsetDist + sniperJitter,
+        this.player.y + Math.sin(this.playerAimAngle) * offsetDist + sniperJitter
+      );
+      this.sniperSprite.setRotation(this.playerAimAngle);
+      // 根据蓄力阶段变色：待命暗红 → 一段/二段红 → 三段亮红
+      if (!this.sniperKitActive) {
+        this.sniperSprite.setTint(0x993333); // 待命暗红
+      } else if (this.sniperKitStage >= 3) {
+        this.sniperSprite.setTint(0xff2222); // 三段亮红
+      } else if (this.sniperKitStage >= 1) {
+        this.sniperSprite.setTint(0xdd3333); // 一段/二段红
+      } else {
+        this.sniperSprite.setTint(0xbb3333);
+      }
+    } else {
+      this.sniperSprite.setVisible(false);
     }
 
     // 屏幕边缘火焰粒子系统

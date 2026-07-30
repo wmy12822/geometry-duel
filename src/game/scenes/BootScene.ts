@@ -164,6 +164,99 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(20, 20, 2);
     g.generateTexture('wpn_sniper', 40, 40);
 
+    // AX50 狙击步枪手持像素画 (80x28) — 红色主题，枪口朝右
+    g.clear();
+    // --- 枪托底板 (buttpad) ---
+    g.fillStyle(0x661111, 1);
+    g.fillRect(0, 8, 3, 14);
+    g.fillStyle(0x881111, 0.7);
+    g.fillRect(1, 9, 1, 12);
+    // --- 枪托主体 (stock, 骨架化) ---
+    g.fillStyle(0x771111, 1);
+    g.fillRect(3, 10, 11, 8);
+    g.fillStyle(0x991111, 0.6);
+    g.fillRect(4, 11, 9, 2);
+    // 枪托镂空 (骨架窗)
+    g.fillStyle(0x220000, 1);
+    g.fillRect(6, 12, 6, 4);
+    // --- 机匣/枪身 (receiver) ---
+    g.fillStyle(0x881818, 1);
+    g.fillRect(14, 7, 14, 12);
+    g.fillStyle(0xaa2222, 0.5);
+    g.fillRect(15, 8, 12, 3);
+    // --- 手枪握把 (pistol grip) ---
+    g.fillStyle(0x771111, 1);
+    g.fillRect(19, 19, 6, 9);
+    g.fillStyle(0x991515, 0.5);
+    g.fillRect(20, 20, 4, 2);
+    // --- 弹匣 (magazine) ---
+    g.fillStyle(0x661111, 1);
+    g.fillRect(15, 17, 7, 5);
+    g.fillStyle(0x881515, 0.6);
+    g.fillRect(16, 18, 5, 2);
+    // --- 瞄准镜 (scope, 机匣上方) ---
+    g.fillStyle(0x440000, 1);
+    g.fillRect(17, 2, 10, 6);
+    g.fillStyle(0x661111, 0.8);
+    g.fillRect(18, 3, 8, 4);
+    // 镜筒前端 (物镜)
+    g.fillStyle(0x550000, 1);
+    g.fillRect(26, 1, 5, 8);
+    g.fillStyle(0x771414, 0.7);
+    g.fillRect(27, 2, 3, 6);
+    // 镜筒后端 (目镜)
+    g.fillStyle(0x550000, 1);
+    g.fillRect(13, 2, 4, 6);
+    g.fillStyle(0x771414, 0.7);
+    g.fillRect(14, 3, 2, 4);
+    // 镜片反光
+    g.fillStyle(0xff4444, 0.5);
+    g.fillRect(28, 3, 1, 4);
+    g.fillStyle(0xff4444, 0.4);
+    g.fillRect(14, 4, 1, 3);
+    // --- 枪机拉柄 (bolt handle) ---
+    g.fillStyle(0x993333, 1);
+    g.fillRect(23, 5, 7, 3);
+    g.fillStyle(0xbb4444, 0.6);
+    g.fillRect(24, 5, 5, 1);
+    // --- 长枪管 (long barrel) ---
+    g.fillStyle(0x881414, 1);
+    g.fillRect(28, 10, 34, 5);
+    // 枪管上缘高光
+    g.fillStyle(0xaa3333, 0.5);
+    g.fillRect(29, 10, 32, 1);
+    // 枪管下缘阴影
+    g.fillStyle(0x550000, 0.5);
+    g.fillRect(29, 14, 32, 1);
+    // --- 制退器/枪口装置 (muzzle brake) ---
+    g.fillStyle(0x771111, 1);
+    g.fillRect(62, 9, 8, 7);
+    // 制退器侧孔
+    g.fillStyle(0x440000, 1);
+    g.fillRect(63, 10, 2, 2);
+    g.fillRect(66, 10, 2, 2);
+    g.fillRect(63, 13, 2, 2);
+    g.fillRect(66, 13, 2, 2);
+    // 制退器高光
+    g.fillStyle(0x993333, 0.6);
+    g.fillRect(62, 9, 8, 1);
+    // 枪口 (muzzle tip)
+    g.fillStyle(0x550000, 1);
+    g.fillRect(70, 10, 2, 5);
+    g.fillStyle(0xaa2222, 0.7);
+    g.fillRect(70, 10, 2, 1);
+    // --- 双脚架 (bipod, 折叠状态) ---
+    g.fillStyle(0x661111, 1);
+    g.fillRect(42, 15, 2, 6);  // 左腿
+    g.fillRect(48, 15, 2, 6);  // 右腿
+    g.fillStyle(0x881515, 0.6);
+    g.fillRect(43, 15, 1, 3);
+    g.fillRect(49, 15, 1, 3);
+    // --- 额外细节: 导轨 (rail) ---
+    g.fillStyle(0x550000, 0.5);
+    g.fillRect(17, 7, 10, 1);
+    g.generateTexture('wpn_ax50', 72, 24);
+
     // 火焰粒子纹理 (16x16 渐变圆，中心亮边缘暗)
     g.clear();
     for (let r = 8; r > 0; r--) {
