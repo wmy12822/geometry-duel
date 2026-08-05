@@ -8,6 +8,7 @@ Audio credits
 
 2) "Gunshot Sounds" by Vincent Sevedge (OpenGameArt)
    https://opengameart.org/content/gunshot-sounds
-   Files: pistol.wav (CZ-52), mosin.wav (Mosin Nagant), sks.wav (SKS), shotgun.wav
+   Files: pistol.ogg (CZ-52), mosin.ogg (Mosin Nagant), sks.ogg (SKS), shotgun.ogg
+   (converted from the original WAV to mono 44.1kHz OGG for size)
    License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
    http://creativecommons.org/licenses/by/3.0/
