@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../constants';
 import { loadSkin, regeneratePlayerSkinTexture } from '../skinConfig';
 import { loadControlMode, saveControlMode } from '../keyConfig';
+import { applyMute, isMuted, loadAudioFiles, playSFX, setMuted, SFX_KEYS, uiClick } from '../sfx';
 
 const NEON_BLUE = 0x00e5ff;
 const NEON_BLUE_STR = '#00e5ff';
@@ -40,6 +41,12 @@ export class StartScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor(0x000000);
+    // 音效已在 BootScene 启动时开始后台加载；此处兜底（已加载/加载中则自动跳过）
+    loadAudioFiles(this);
+    // 通用 UI 点击音：任何带 useHandCursor 的按钮按下即响（绘画面板/滑块等非按钮除外）
+    this.input.on('gameobjectdown', (obj: Phaser.GameObjects.GameObject) => {
+      if ((obj as { input?: { useHandCursor?: boolean } }).input?.useHandCursor) uiClick(this);
+    });
     this.drawGrid();
 
     // 收集所有UI元素以便做入场动画
@@ -90,7 +97,7 @@ export class StartScene extends Phaser.Scene {
     uiElements.push(techLine);
 
     // 左侧大标题
-    const titleText = this.add.text(205, 270, '几 何\n决 斗\nPLUS', {
+    const titleText = this.add.text(205, 270, '战 斗\n系 统\nSYSTEM', {
       fontFamily: FONT_IMPACT, fontSize: '72px', color: NEON_BLUE_STR, fontStyle: 'italic bold',
       align: 'center', lineSpacing: 10
     }).setOrigin(0.5).setAlpha(0);
@@ -190,26 +197,23 @@ export class StartScene extends Phaser.Scene {
     rightMenuContainer: Phaser.GameObjects.Container,
     playZone: Phaser.GameObjects.Zone
   ) {
-    const linesCount = 40; // 左右各20条
+    const linesCount = 24; // 左右各12条（原40条，每条 postFX 模糊太吃 GPU，弱设备会卡死）
     const lines: Phaser.GameObjects.Rectangle[] = [];
     const cx = GAME_WIDTH / 2;
-    
+
     // 生成竖线
     for (let i = 0; i < linesCount; i++) {
-      const isLeft = i < 20;
+      const isLeft = i < 12;
       // 粗细不一
       const thickness = Phaser.Math.Between(2, 8);
       const line = this.add.rectangle(cx, GAME_HEIGHT / 2, thickness, GAME_HEIGHT, 0xffffff, 1).setDepth(100);
-      
+
       // 为每条线随机分配目标距离边缘的位置，距离越近速度越慢（即花费时间相同）
-      const targetX = isLeft 
+      const targetX = isLeft
         ? Phaser.Math.Between(-20, 200) // 左侧边缘区域
         : Phaser.Math.Between(GAME_WIDTH - 200, GAME_WIDTH + 20); // 右侧边缘区域
-      
-      // 添加残影滤镜
-      if ((line as any).postFX) {
-        (line as any).postFX.addBlur(0, 2, 0, 1, 0xffffff); // 水平残影
-      }
+
+      // 残影 blur 已移除：40 个 postFX 模糊通道是低端设备冻结的元凶，竖线扫过效果本身保留
 
       this.tweens.add({
         targets: line,
@@ -796,7 +800,29 @@ export class StartScene extends Phaser.Scene {
       fontFamily: FONT_MONO, fontSize: '15px', color: NEON_BLUE_STR, align: 'center'
     }).setOrigin(0.5).setDepth(52);
 
-    this.panelContentGroup.addMultiple([modeLabel, mobileBtn, pcBtn, keyBtn, skinBtn, hint]);
+    // 音效 开/关
+    const soundToggleY = 435;
+    const muted = isMuted();
+    const soundLabel = this.add.text(680, soundToggleY, '音效:', {
+      fontFamily: FONT_MONO, fontSize: '14px', color: '#888888'
+    }).setOrigin(0, 0.5).setDepth(52);
+    const soundBtn = this.add.text(755, soundToggleY, muted ? '◀ 关 ▶' : '◀ 开 ▶', {
+      fontFamily: FONT_IMPACT, fontSize: '20px',
+      color: muted ? '#555555' : '#00ff88', fontStyle: 'italic'
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true }).setDepth(52);
+    soundBtn.on('pointerdown', () => {
+      const nowMuted = !isMuted();
+      setMuted(nowMuted);
+      applyMute(this);
+      // 取消静音时立即播放一次音效，作为"音频可用"的即时验证
+      if (!nowMuted) {
+        playSFX(this, SFX_KEYS.shoot[0], { volume: 0.6 });
+      }
+      this.clearPanelContent();
+      this.buildCustomContent();
+    });
+
+    this.panelContentGroup.addMultiple([modeLabel, mobileBtn, pcBtn, keyBtn, skinBtn, hint, soundLabel, soundBtn]);
   }
 
   // ----- 画面设置面板内容 -----

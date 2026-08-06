@@ -2,7 +2,7 @@
   "name": "geometry-duel",
   "version": "1.0.0",
   "type": "module",
-  "description": "几何对决 — 2D 像素几何射击对战游戏",
+  "description": "战斗系统 — 2D 像素几何射击对战游戏",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

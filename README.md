@@ -1,4 +1,4 @@
-# 几何对决 — Geometry Duel
+# 战斗系统
 
 2D 像素几何射击对战游戏，基于 Phaser 3 + React + TypeScript 构建。
 
@@ -37,6 +37,13 @@ npm run dev      # 启动开发服务器
 npm run build    # 生产构建
 npm run preview  # 预览构建产物
 ```
+
+## 音效来源
+
+- **《几何决斗》原始音效** — 来自开源仓库 `pama1234/just-some-other-libgdx-game`（game0003），该仓库为 **GNU AGPL v3.0** 许可；文件 `mech_fire/ult_fire/bolt_arm/charge_done/hit_metal.ogg`。来源：https://github.com/pama1234/just-some-other-libgdx-game
+- **Gunshot Sounds** by Vincent Sevedge — OpenGameArt，**CC BY 3.0**；文件 `pistol/mosin/sks/shotgun.ogg`（由原始 WAV 转为单声道 OGG 压缩）。来源：https://opengameart.org/content/gunshot-sounds
+
+详细说明见 `public/audio/CREDITS.txt`。
 
 ## 许可
 
