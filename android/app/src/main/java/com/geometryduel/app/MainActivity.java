@@ -6,18 +6,30 @@ import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import androidx.webkit.WebViewAssetLoader;
+
 public class MainActivity extends Activity {
 
     private WebView web;
+    private WebViewAssetLoader assetLoader;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // 游戏已打包进 APK 的 assets/game/。通过 androidx.webkit 的虚拟 https 源
+        // (appassets.androidplatform.net) 加载，ES Module 脚本与 fetch(音频) 均可用，
+        // 全程离线、不依赖任何外网域名。
+        assetLoader = new WebViewAssetLoader.Builder()
+                .addPathHandler("/game/", new WebViewAssetLoader.AssetsPathHandler(this))
+                .build();
 
         web = new WebView(this);
         web.setBackgroundColor(0xFF0F0F0F);
@@ -30,12 +42,16 @@ public class MainActivity extends Activity {
         s.setUseWideViewPort(true);
         s.setBuiltInZoomControls(false);
 
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                return assetLoader.shouldInterceptRequest(request.getUrl());
+            }
+        });
         web.setWebChromeClient(new WebChromeClient());
         web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
-        // 加载在线版本（需要联网；游戏内已做自适应缩放）
-        web.loadUrl("https://wmy12822.github.io/geometry-duel/");
+        web.loadUrl("https://appassets.androidplatform.net/game/index.html");
 
         setContentView(web);
     }
