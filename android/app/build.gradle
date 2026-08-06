@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.geometryduel.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.geometryduel.app"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        release {
+            def ks = System.getenv("KEYSTORE")
+            storeFile file(ks ? ks : "keystore.jks")
+            storePassword System.getenv("KS_PASS") ?: "geometry123"
+            keyAlias System.getenv("KEY_ALIAS") ?: "geometry"
+            keyPassword System.getenv("KEY_PASS") ?: "geometry123"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

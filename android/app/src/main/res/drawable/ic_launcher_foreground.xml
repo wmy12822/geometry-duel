@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 蓝色三角（游戏主角造型） -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M54,24 L82,72 L26,72 Z" />
+    <path
+        android:fillColor="#0F0F0F"
+        android:pathData="M54,40 L70,64 L38,64 Z" />
+</vector>
