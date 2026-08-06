@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../constants';
+import { uiClick } from '../sfx';
 import { SKIN_PALETTE, loadSkin, saveSkin, SkinData } from '../skinConfig';
 
 const NEON_BLUE = 0x00e5ff;
@@ -31,6 +32,11 @@ export class ColorPickerScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor(0x000000);
     this.drawBackground();
+
+    // 按钮点击音（色板/加减按钮均有 useHandCursor）
+    this.input.on('gameobjectdown', (obj: Phaser.GameObjects.GameObject) => {
+      if ((obj as { input?: { useHandCursor?: boolean } }).input?.useHandCursor) uiClick(this);
+    });
 
     const titleText = this.mode === 'bg' ? '背 景 颜 色' : this.mode === 'trail' ? '攻 击 特 效' : '子 弹 颜 色';
     this.add.text(GAME_WIDTH / 2, 80, titleText, {

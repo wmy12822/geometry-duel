@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { COLORS, GAME_HEIGHT, GAME_WIDTH } from '../constants';
+import { uiClick } from '../sfx';
 
 // 游戏结束页面：显示胜利或失败结果，提供重新开始与返回主菜单
 export class GameOverScene extends Phaser.Scene {
@@ -45,10 +46,12 @@ export class GameOverScene extends Phaser.Scene {
     const menuBtn = this.makeButton(GAME_HEIGHT / 2 + 110, '返 回 主 菜 单', '#CCCCCC');
 
     restartBtn.on('pointerdown', () => {
+      uiClick(this);
       this.scene.start('GameScene', { mode: this.lastMode });
     });
 
     menuBtn.on('pointerdown', () => {
+      uiClick(this);
       this.scene.start('StartScene');
     });
   }

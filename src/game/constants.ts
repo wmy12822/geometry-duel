@@ -74,6 +74,18 @@ export const SNIPER_SPEED_MULT_STAGE2 = 1.5; // 第二阶段弹速倍率
 export const SNIPER_SPEED_MULT_STAGE3 = 2.5; // 第三阶段弹速倍率
 export const SNIPER_PREDICT_TIME = 0.3; // 预测提前量（秒）
 
+// 风爆技能
+export const WIND_BURST_TIMESCALE = 0.06; // 慢放倍率
+export const WIND_BURST_AOE_INNER_R = 120; // AoE内圈半径
+export const WIND_BURST_AOE_MIDDLE_R = 240; // AoE中圈半径
+export const WIND_BURST_AOE_OUTER_R = 360; // AoE外圈半径
+export const WIND_BURST_CONFIRM_DEADZONE = 25; // 确认死区(px)
+export const WIND_BURST_STUN_DURATION = 800; // 击退结束后的僵直时长(ms)
+export const WIND_BURST_AOE_ANIM_DURATION = 600; // AoE动画时长(ms)
+export const WIND_BURST_CAMERA_ZOOM = 0.7; // 技能启用时镜头拉远倍率
+export const WIND_BURST_CROSSHAIR_COLOR_GREEN = 0x00ff88;
+export const WIND_BURST_CROSSHAIR_COLOR_RED = 0xff2222;
+
 // 颜色（纯色，无渐变）
 export const COLORS = {
   bg: 0xffffff, // 纯白

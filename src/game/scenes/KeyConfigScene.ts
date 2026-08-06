@@ -1,12 +1,13 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, COLORS } from '../constants';
+import { uiClick } from '../sfx';
 import {
   loadKeyLayout, saveKeyLayout, KeyLayoutConfig,
   loadPCBindings, savePCBindings, PCKeyBindings,
   loadControlMode, saveControlMode, ControlMode, KEY_NAME_MAP
 } from '../keyConfig';
 
-type ControlKey = 'joystick' | 'z' | 'x' | 'c' | 'v' | 'w';
+type ControlKey = 'joystick' | 'z' | 'x' | 'c' | 'v' | 'w' | 'skillWheel';
 
 interface ControlObj {
   key: ControlKey;
@@ -68,6 +69,11 @@ export class KeyConfigScene extends Phaser.Scene {
     this.game.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     this.cameras.main.setBackgroundColor(0x000000);
 
+    // 按钮点击音（滑块 draggable=true 无 useHandCursor，不会误响）
+    this.input.on('gameobjectdown', (obj: Phaser.GameObjects.GameObject) => {
+      if ((obj as { input?: { useHandCursor?: boolean } }).input?.useHandCursor) uiClick(this);
+    });
+
     const mode: ControlMode = (data && data.mode) || loadControlMode();
 
     if (mode === 'pc') {
@@ -114,6 +120,7 @@ export class KeyConfigScene extends Phaser.Scene {
       { action: 'ultimate', label: '大招' },
       { action: 'dash', label: '冲刺' },
       { action: 'parry', label: '弹反' },
+      { action: 'skill', label: '技能' },
       { action: 'pause', label: '暂停' },
     ];
 
@@ -373,6 +380,7 @@ export class KeyConfigScene extends Phaser.Scene {
     this.drawRectControl('c', 'C');
     this.drawRectControl('v', 'V');
     this.drawButtonControl('w', '武器轮盘');
+    this.drawButtonControl('skillWheel', '技能轮盘');
   }
 
   private drawJoystickControl() {
@@ -551,9 +559,12 @@ export class KeyConfigScene extends Phaser.Scene {
         const nx = Phaser.Math.Clamp(pointer.x, this.sizeSliderMinX, this.sizeSliderMaxX);
         this.sizeSlider.x = nx;
         const t = (nx - this.sizeSliderMinX) / (this.sizeSliderMaxX - this.sizeSliderMinX);
-        const size = Math.round(40 + t * 120);
-        this.sizeValText.setText(String(size));
-        if (this.selectedKey) this.applySize(this.selectedKey, size);
+        if (this.selectedKey) {
+          const [min, max] = this.getSizeRange(this.selectedKey);
+          const size = Math.round(min + t * (max - min));
+          this.sizeValText.setText(String(size));
+          this.applySize(this.selectedKey, size);
+        }
       } else if (this.activeSlider === 'alpha') {
         const nx = Phaser.Math.Clamp(pointer.x, this.alphaSliderMinX, this.alphaSliderMaxX);
         this.alphaSlider.x = nx;
@@ -572,7 +583,8 @@ export class KeyConfigScene extends Phaser.Scene {
     this.selectedKey = key;
     const cfg = this.layout[key];
     // 同步滑条位置
-    const sizeT = Phaser.Math.Clamp((cfg.size - 40) / 120, 0, 1);
+    const [sizeMin, sizeMax] = this.getSizeRange(key);
+    const sizeT = Phaser.Math.Clamp((cfg.size - sizeMin) / (sizeMax - sizeMin), 0, 1);
     this.sizeSlider.x = this.sizeSliderMinX + sizeT * (this.sizeSliderMaxX - this.sizeSliderMinX);
     const alphaT = Phaser.Math.Clamp(cfg.alpha, 0, 1);
     this.alphaSlider.x = this.alphaSliderMinX + alphaT * (this.alphaSliderMaxX - this.alphaSliderMinX);
@@ -582,6 +594,11 @@ export class KeyConfigScene extends Phaser.Scene {
   private closePanel() {
     this.selectedKey = null;
     this.panelGroup.setVisible(false);
+  }
+
+  // 不同控件的大小可调范围（技能轮盘为直径，其他为按钮宽高）
+  private getSizeRange(key: ControlKey): [number, number] {
+    return key === 'skillWheel' ? [120, 320] : [40, 160];
   }
 
   private applySize(key: ControlKey, size: number) {

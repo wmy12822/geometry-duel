@@ -1,0 +1,14 @@
+Audio credits
+=============
+
+1) 《几何决斗》(Geometry Duel) 原始音效
+   Source: pama1234/just-some-other-libgdx-game (game0003) — https://github.com/pama1234/just-some-other-libgdx-game
+   Files: mech_fire.ogg, ult_fire.ogg, bolt_arm.ogg, charge_done.ogg, hit_metal.ogg
+   License: GNU AGPL v3.0 (applies to the source repo) — https://www.gnu.org/licenses/agpl-3.0.html
+
+2) "Gunshot Sounds" by Vincent Sevedge (OpenGameArt)
+   https://opengameart.org/content/gunshot-sounds
+   Files: pistol.ogg (CZ-52), mosin.ogg (Mosin Nagant), sks.ogg (SKS), shotgun.ogg
+   (converted from the original WAV to mono 44.1kHz OGG for size)
+   License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
+   http://creativecommons.org/licenses/by/3.0/

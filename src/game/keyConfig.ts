@@ -15,6 +15,7 @@ export interface KeyLayoutConfig {
   c: KeyButtonConfig;
   v: KeyButtonConfig;
   w: KeyButtonConfig; // 武器轮盘
+  skillWheel: KeyButtonConfig; // 技能轮盘（size 为直径）
 }
 
 // PC 键盘绑定
@@ -28,6 +29,7 @@ export interface PCKeyBindings {
   dash: string;
   parry: string;
   pause: string;
+  skill: string;
 }
 
 export const DEFAULT_PC_BINDINGS: PCKeyBindings = {
@@ -40,6 +42,7 @@ export const DEFAULT_PC_BINDINGS: PCKeyBindings = {
   dash: 'Space',
   parry: 'V',
   pause: 'ESC',
+  skill: 'Q',
 };
 
 // 控制模式
@@ -56,6 +59,8 @@ export const DEFAULT_KEY_LAYOUT: KeyLayoutConfig = {
   c: { x: GAME_WIDTH - 130, y: GAME_HEIGHT - 160, size: 60, alpha: 1 },
   v: { x: GAME_WIDTH - 80, y: GAME_HEIGHT - 170, size: 60, alpha: 1 },
   w: { x: 55, y: GAME_HEIGHT - 200, size: 48, alpha: 0.9 },
+  // 技能轮盘：默认在武器按钮正上方（w.y - 60），size 为轮盘直径（半径 120）
+  skillWheel: { x: 55, y: GAME_HEIGHT - 260, size: 240, alpha: 0.9 },
 };
 
 export function loadKeyLayout(): KeyLayoutConfig {
@@ -70,6 +75,7 @@ export function loadKeyLayout(): KeyLayoutConfig {
         c: { ...DEFAULT_KEY_LAYOUT.c, ...parsed.c },
         v: { ...DEFAULT_KEY_LAYOUT.v, ...parsed.v },
         w: { ...DEFAULT_KEY_LAYOUT.w, ...parsed.w },
+        skillWheel: { ...DEFAULT_KEY_LAYOUT.skillWheel, ...parsed.skillWheel },
       };
     }
   } catch { /* ignore */ }

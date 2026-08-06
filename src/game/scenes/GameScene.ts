@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { ASSET_KEYS } from '../assets';
 import { regeneratePlayerSkinTexture, loadSkin } from '../skinConfig';
+import { playRandom, playSFX, SFX_KEYS } from '../sfx';
 import {
   BULLET_SPEED,
   BULLET_SIZE,
@@ -56,7 +57,17 @@ import {
   SNIPER_STAGE3_TIME,
   SNIPER_SPEED_MULT_STAGE2,
   SNIPER_SPEED_MULT_STAGE3,
-  SNIPER_PREDICT_TIME
+  SNIPER_PREDICT_TIME,
+  WIND_BURST_TIMESCALE,
+  WIND_BURST_AOE_INNER_R,
+  WIND_BURST_AOE_MIDDLE_R,
+  WIND_BURST_AOE_OUTER_R,
+  WIND_BURST_CONFIRM_DEADZONE,
+  WIND_BURST_STUN_DURATION,
+  WIND_BURST_AOE_ANIM_DURATION,
+  WIND_BURST_CAMERA_ZOOM,
+  WIND_BURST_CROSSHAIR_COLOR_GREEN,
+  WIND_BURST_CROSSHAIR_COLOR_RED
 } from '../constants';
 import { loadKeyLayout, KeyLayoutConfig, loadControlMode, loadPCBindings, PCKeyBindings } from '../keyConfig';
 
@@ -110,6 +121,7 @@ export class GameScene extends Phaser.Scene {
     this.chargeStartTime = time;
     this.chargeCompleteSoundPlayed = false;
     this.enemyMarkPendingRemove = false;
+    playSFX(this, SFX_KEYS.chargeUp[0], { volume: 0.5 });
 
     // 狙击套件：消费挂起状态，进入狙击蓄力模式
     if (this.sniperKitPending) {
@@ -210,6 +222,7 @@ export class GameScene extends Phaser.Scene {
   // 敌人蓄力状态
   private isEnemyChargingUltimate = false;
   private enemyChargeStartTime = 0;
+  private enemyUltimateDisabledUntil = 0; // 此时间前禁止敌人蓄力大招
   private enemyAimAngle = 0;
   private enemyChargeCompleteSoundPlayed = false;
 
@@ -219,6 +232,7 @@ export class GameScene extends Phaser.Scene {
   private parryCooldown = 0;
   private parrySuccess = false;
   private vKey!: Phaser.Input.Keyboard.Key;
+  private skillKey!: Phaser.Input.Keyboard.Key;
   private virtualVPointer: Phaser.Input.Pointer | null = null;
   private isNormalAttackDisabled = false;
   private normalAttackDisableEndTime = 0;
@@ -260,17 +274,51 @@ export class GameScene extends Phaser.Scene {
   private sniperSpeedMult = 1.0;
   private sniperPredictGfx!: Phaser.GameObjects.Graphics;
   private sniperEnemyHighlightGfx!: Phaser.GameObjects.Graphics;
-  private currentSniperTimeScale = 1.0; // 平滑过渡的当前 timeScale
+  private currentSniperTimeScale = 1.0; // 平滑过渡的当前慢放倍率
+  private lastSniperSlowMult = 1.0; // 每帧子弹速度缩放用到的上一帧倍率
   private sniperFreezeUntil = 0; // 发射后保持敌人冻结直到此时间戳
   private thermalScopeSprite!: Phaser.GameObjects.Sprite; // 热成像瞄具遮罩
   private enemyGlowSprite!: Phaser.GameObjects.Sprite;   // 敌人热成像高亮光晕
   private sniperStage2Alpha = 0; // 二段暗角过渡 alpha（0→1 tween）
   private sniperStage3Alpha = 0; // 三段热成像过渡 alpha（0→1 tween）
 
+  // ====== 技能轮盘 ======
+  private skillBtn!: Phaser.GameObjects.Sprite;
+  private skillBtnGfx!: Phaser.GameObjects.Graphics;
+  private skillWheelGfx!: Phaser.GameObjects.Graphics;
+  private skillWheelIcons: Phaser.GameObjects.Text[] = [];
+  private skillWheelLabels: Phaser.GameObjects.Text[] = [];
+  private skillWheelVisible = false;
+  private skillBtnPressed = false;
+  private skillBtnPressTime = 0;
+  private skillBtnPointer: Phaser.Input.Pointer | null = null;
+  private skillKeyTriggered = false;
+  private skillHoveredSlot = -1;
+  private skillCooldownEnd = 0;
+  private activeSkill: string | null = null;
+  private skillCdText!: Phaser.GameObjects.Text;
+
   private readonly WEAPON_KITS = [
     { key: 'charge', name: '冲锋', icon: 'wpn_charge', color: 0xffcc00, desc: '攻速↑移速↑ 散布↑' },
     { key: 'sniper', name: '狙击', icon: 'wpn_sniper', color: 0xff0000, desc: '蓄力→时停→预测锁定' },
   ];
+
+  private readonly SKILLS = [
+    { key: 'wind_burst', name: '风爆', icon: '💨', color: 0x00ff88, desc: '时缓瞄准→范围击退' },
+  ];
+
+  // 风爆技能状态
+  private windBurstPhase: 'idle' | 'slowmo_aiming' | 'slowmo_placed' | 'releasing' = 'idle';
+  private windBurstCrosshairX = 0;
+  private windBurstCrosshairY = 0;
+  private windBurstFirstTapX = 0;
+  private windBurstFirstTapY = 0;
+  private windBurstAoECenterX = 0;
+  private windBurstAoECenterY = 0;
+  private windBurstCrosshairGfx!: Phaser.GameObjects.Graphics;
+  private windBurstAoEGfx!: Phaser.GameObjects.Graphics;
+  private windBurstAoeStartTime = 0;
+  private windBurstPointerHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
 
   // 敌人弹反状态
   private isEnemyParrying = false;
@@ -443,6 +491,10 @@ export class GameScene extends Phaser.Scene {
     this.weaponBtnPointer = null;
     this.weaponWheelVisible = false;
     this.weaponHoveredSlot = -1;
+    this.skillBtnPressed = false;
+    this.skillBtnPointer = null;
+    this.skillWheelVisible = false;
+    this.skillHoveredSlot = -1;
     this.activeKit = null;
     this.kitEffectEndTime = 0;
     this.kitCooldownEnd = 0;
@@ -451,6 +503,19 @@ export class GameScene extends Phaser.Scene {
     this.sniperKitStage = 0;
     this.sniperSpeedMult = 1.0;
     this.currentSniperTimeScale = 1.0;
+    this.lastSniperSlowMult = 1.0;
+
+    // 风爆技能状态重置
+    this.windBurstPhase = 'idle';
+    this.windBurstAoeStartTime = 0;
+    this.windBurstPointerHandler = null;
+    this.skillCooldownEnd = 0;
+
+    // 其他绝对时间戳冷却重置（场景实例复用，字段初始化器不重跑，必须显式清零）
+    this.parryCooldown = 0;
+    this.sniperFreezeUntil = 0;
+    this.enemyParryCooldown = 0;
+    this.lastEnemyMeleeTime = 0;
 
     // 生成大招拖尾粒子纹理（中心亮，边缘暗且带有透明度过渡，能更好地受 tint 影响）
     const trailGraphics = this.add.graphics();
@@ -502,6 +567,7 @@ export class GameScene extends Phaser.Scene {
     
     this.isEnemyChargingUltimate = false;
     this.enemyChargeStartTime = 0;
+    this.enemyUltimateDisabledUntil = 0;
     this.enemyAimAngle = 0;
     this.enemyChargeCompleteSoundPlayed = false;
 
@@ -646,6 +712,7 @@ export class GameScene extends Phaser.Scene {
         this.xKey = kb.addKey(k(bindings.ultimate));
         this.cKey = kb.addKey(k(bindings.dash));
         this.vKey = kb.addKey(k(bindings.parry));
+        this.skillKey = kb.addKey(k(bindings.skill));
         this.spaceKey = kb.addKey(k(bindings.dash)); // dash 也可用 cKey
         this.esc = kb.addKey(k(bindings.pause));
         this.cursors = this.input.keyboard.createCursorKeys(); // 保留备用
@@ -662,6 +729,7 @@ export class GameScene extends Phaser.Scene {
         this.xKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.X);
         this.cKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.C);
         this.vKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.V);
+        this.skillKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
         this.spaceKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
       }
     }
@@ -684,6 +752,8 @@ export class GameScene extends Phaser.Scene {
 
     // 武器套件按钮
     this.createWeaponButton();
+    // 技能轮盘按钮
+    this.createSkillButton();
     this.flameEmitters = [];
     this.initFlameParticles();
 
@@ -710,6 +780,10 @@ export class GameScene extends Phaser.Scene {
     
     // 弹反弧线特效绘制层
     this.parryArcGraphics = this.add.graphics().setDepth(3.5);
+
+    // 风爆技能图形层（准心：屏幕空间 / AoE：世界空间）
+    this.windBurstCrosshairGfx = this.add.graphics().setDepth(150).setScrollFactor(0).setVisible(false);
+    this.windBurstAoEGfx = this.add.graphics().setDepth(5).setVisible(false);
 
     // 顶部HUD
     this.createHUD();
@@ -766,6 +840,21 @@ export class GameScene extends Phaser.Scene {
       if (this.weaponBtnPointer === pointer) {
         this.weaponBtnPressed = false;
         this.weaponBtnPointer = null;
+        return;
+      }
+      // 技能轮盘释放（键盘触发时跳过，由 skillKey JustUp 处理）
+      if (this.skillBtnPointer === pointer && this.skillWheelVisible && !this.skillKeyTriggered) {
+        if (this.skillHoveredSlot >= 0) {
+          this.activateSkill(this.SKILLS[this.skillHoveredSlot].key);
+        }
+        this.hideSkillWheel();
+        this.skillBtnPressed = false;
+        this.skillBtnPointer = null;
+        return;
+      }
+      if (this.skillBtnPointer === pointer && !this.skillKeyTriggered) {
+        this.skillBtnPressed = false;
+        this.skillBtnPointer = null;
         return;
       }
       if (this.virtualZPointer === pointer) {
@@ -992,6 +1081,218 @@ export class GameScene extends Phaser.Scene {
     this.weaponBtnGfx.fillCircle(this.weaponBtnX, this.weaponBtnY, 28);
   }
 
+  // ====== 技能轮盘 ======
+
+  private get skillBtnX() { return this.keyLayout.skillWheel.x; }
+  private get skillBtnY() { return this.keyLayout.skillWheel.y; }
+  private get skillWheelRadius() { return this.keyLayout.skillWheel.size / 2; }
+
+  private createSkillButton() {
+    const bx = this.skillBtnX, by = this.skillBtnY;
+
+    this.skillBtnGfx = this.add.graphics().setDepth(100).setScrollFactor(0);
+    this.drawSkillBtnBg(1);
+
+    this.skillBtn = this.add.sprite(bx, by, 'wpn_btn')
+      .setDepth(101).setScrollFactor(0).setInteractive({ draggable: true });
+
+    // 图标文字
+    const iconText = this.add.text(bx, by, '✨', { fontSize: '22px' })
+      .setOrigin(0.5).setDepth(102).setScrollFactor(0);
+
+    this.skillWheelGfx = this.add.graphics().setDepth(102).setScrollFactor(0).setVisible(false);
+
+    // 冷却文字
+    this.skillCdText = this.add.text(bx, by + 34, '', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#888888'
+    }).setOrigin(0.5).setDepth(101).setScrollFactor(0);
+
+    // 长按触发轮盘
+    this.skillBtn.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      this.skillBtnPressed = true;
+      this.skillBtnPressTime = this.time.now;
+      this.skillBtnPointer = pointer;
+    });
+
+    this.skillBtn.on('pointerover', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.isDown && !this.skillBtnPressed) {
+        this.skillBtnPressed = true;
+        this.skillBtnPressTime = this.time.now;
+        this.skillBtnPointer = pointer;
+      }
+    });
+  }
+
+  private drawSkillBtnBg(brightness: number) {
+    this.skillBtnGfx.clear();
+    const a = Math.round(80 * brightness) * this.keyLayout.skillWheel.alpha;
+    this.skillBtnGfx.fillStyle(0x666666, a / 255);
+    this.skillBtnGfx.fillCircle(this.skillBtnX, this.skillBtnY, 28);
+  }
+
+  private showSkillWheel() {
+    if (this.skillWheelVisible) return;
+    this.skillWheelVisible = true;
+    this.skillWheelGfx.setVisible(true);
+    this.drawSkillBtnBg(2);
+
+    const cx = this.skillBtnX, cy = this.skillBtnY;
+    const skillCount = this.SKILLS.length;
+
+    this.skillWheelIcons.forEach(s => s.destroy());
+    this.skillWheelLabels.forEach(t => t.destroy());
+    this.skillWheelIcons = [];
+    this.skillWheelLabels = [];
+
+    this.redrawSkillWheel(-1);
+
+    const sliceAngle = skillCount === 1 ? Math.PI * 2 : (Math.PI * 2) / skillCount;
+    for (let i = 0; i < skillCount; i++) {
+      const midAngle = i * sliceAngle - Math.PI / 2 + sliceAngle / 2;
+      const skill = this.SKILLS[i];
+      const iconDist = this.skillWheelRadius * 0.6;
+      const ix = cx + Math.cos(midAngle) * iconDist;
+      const iy = cy + Math.sin(midAngle) * iconDist;
+      const icon = this.add.text(ix, iy, skill.icon, { fontSize: '26px' })
+        .setOrigin(0.5).setDepth(103).setScrollFactor(0);
+      this.skillWheelIcons.push(icon);
+
+      const labelDist = this.skillWheelRadius * 0.3;
+      const lx = cx + Math.cos(midAngle) * labelDist;
+      const ly = cy + Math.sin(midAngle) * labelDist - 18;
+      const label = this.add.text(lx, ly, skill.name, {
+        fontFamily: 'monospace', fontSize: '11px', color: '#ffffff', fontStyle: 'bold'
+      }).setOrigin(0.5).setDepth(103).setScrollFactor(0);
+      this.skillWheelLabels.push(label);
+    }
+  }
+
+  private hideSkillWheel() {
+    this.skillWheelVisible = false;
+    this.skillWheelGfx.clear();
+    this.skillWheelGfx.setVisible(false);
+    this.skillWheelIcons.forEach(s => s.destroy());
+    this.skillWheelIcons = [];
+    this.skillWheelLabels.forEach(t => t.destroy());
+    this.skillWheelLabels = [];
+    this.skillHoveredSlot = -1;
+    this.drawSkillBtnBg(1);
+  }
+
+  private getSkillHoveredSlot(px: number, py: number): number {
+    const cx = this.skillBtnX, cy = this.skillBtnY;
+    const dx = px - cx, dy = py - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 25 || dist > this.skillWheelRadius + 40) return -1;
+
+    let angle = Math.atan2(dy, dx) + Math.PI / 2;
+    if (angle < 0) angle += Math.PI * 2;
+    const sliceAngle = (Math.PI * 2) / this.SKILLS.length;
+    return Math.floor(angle / sliceAngle);
+  }
+
+  private redrawSkillWheel(hoveredSlot: number) {
+    const g = this.skillWheelGfx;
+    const cx = this.skillBtnX, cy = this.skillBtnY;
+    const skillCount = this.SKILLS.length;
+    const sliceAngle = skillCount === 1 ? Math.PI * 2 : (Math.PI * 2) / skillCount;
+
+    g.clear();
+    g.fillStyle(0x000000, 0.3);
+    g.fillCircle(cx, cy, this.skillWheelRadius + 60);
+    g.fillStyle(0x0f0f0f, 1);
+    g.fillCircle(cx, cy, 22);
+
+    for (let i = 0; i < skillCount; i++) {
+      const startAngle = i * sliceAngle - Math.PI / 2;
+      const endAngle = startAngle + sliceAngle;
+      const skill = this.SKILLS[i];
+      const hovered = i === hoveredSlot;
+
+      g.fillStyle(skill.color, hovered ? 0.8 : 0.4);
+      g.beginPath();
+      g.moveTo(cx, cy);
+      g.arc(cx, cy, this.skillWheelRadius, startAngle, endAngle, false);
+      g.closePath();
+      g.fillPath();
+
+      g.lineStyle(hovered ? 3 : 1.5, 0xffffff, hovered ? 0.9 : 0.35);
+      g.beginPath();
+      g.moveTo(cx, cy);
+      g.arc(cx, cy, this.skillWheelRadius, startAngle, endAngle, false);
+      g.closePath();
+      g.strokePath();
+    }
+
+    g.lineStyle(2, 0xffffff, 0.5);
+    g.strokeCircle(cx, cy, this.skillWheelRadius);
+    g.lineStyle(2, 0xffffff, 0.3);
+    g.strokeCircle(cx, cy, 22);
+  }
+
+  private activateSkill(key: string) {
+    const skill = this.SKILLS.find(s => s.key === key);
+    if (!skill) return;
+
+    if (this.time.now < this.skillCooldownEnd) {
+      this.showKitHint('技能冷却中...', '#ff4444');
+      return;
+    }
+
+    // 风爆特殊处理：进入独立状态机
+    if (key === 'wind_burst') {
+      this.startWindBurst();
+      return;
+    }
+
+    this.activeSkill = key;
+    this.skillCooldownEnd = this.time.now + 15000; // 15 秒冷却
+    this.cameras.main.flash(200, (skill.color >> 16) & 0xff, (skill.color >> 8) & 0xff, skill.color & 0xff);
+    this.showKitHint(`【${skill.name}】已激活！`, '#00e5ff');
+  }
+
+  private updateSkillSystem(time: number) {
+    // 长按检测
+    if (this.skillBtnPressed && !this.skillWheelVisible) {
+      if (time - this.skillBtnPressTime >= WEAPON_WHEEL_LONG_PRESS) {
+        if (time < this.skillCooldownEnd) {
+          this.skillBtnPressed = false;
+          this.skillBtnPointer = null;
+          this.skillKeyTriggered = false;
+          return;
+        }
+        this.showSkillWheel();
+      }
+    }
+
+    // 轮盘可见时追踪指向位置
+    if (this.skillWheelVisible && this.skillBtnPointer) {
+      const slot = this.getSkillHoveredSlot(this.skillBtnPointer.x, this.skillBtnPointer.y);
+      if (slot !== this.skillHoveredSlot) {
+        this.skillHoveredSlot = slot;
+        this.redrawSkillWheel(slot);
+      }
+    }
+
+    // 更新冷却显示
+    if (time < this.skillCooldownEnd) {
+      const remaining = Math.ceil((this.skillCooldownEnd - time) / 1000);
+      this.skillCdText.setText(`${remaining}s`);
+      this.skillCdText.setColor('#ff4444');
+    } else {
+      this.skillCdText.setText('');
+    }
+  }
+
+  private unloadSkillWheel() {
+    this.skillBtnPressed = false;
+    this.skillBtnPointer = null;
+    this.skillKeyTriggered = false;
+    if (this.skillWheelVisible) {
+      this.hideSkillWheel();
+    }
+  }
+
   private showWeaponWheel() {
     if (this.weaponWheelVisible) return;
     this.weaponWheelVisible = true;
@@ -1078,6 +1379,7 @@ export class GameScene extends Phaser.Scene {
       this.sniperKitPending = true;
       this.activeKit = 'sniper';
       this.cameras.main.flash(200, 255, 0, 0);
+      playSFX(this, SFX_KEYS.chargeComplete[0], { volume: 0.6, detune: -100 });
       this.showKitHint('【狙击套件】待命中 — 下次大招蓄力触发', '#ff0000');
       return;
     }
@@ -1088,6 +1390,7 @@ export class GameScene extends Phaser.Scene {
     this.kitCooldownEnd = this.time.now + WEAPON_KIT_DURATION + WEAPON_KIT_COOLDOWN;
 
     this.cameras.main.flash(200, 255, 200, 0);
+    playSFX(this, SFX_KEYS.chargeComplete[0], { volume: 0.7 }); // 武器套件激活
 
     this.showKitHint(`【${kit.name}套件】已激活！`, '#ffcc00');
   }
@@ -1117,6 +1420,7 @@ export class GameScene extends Phaser.Scene {
     { id: 'normal-hold', name: '普攻·长按', desc: '按住 Z 键 或 鼠标左键\n持续连射靶子 (1秒)', event: 'normal-hold', btn: 'z' as const, hold: true },
     { id: 'ultimate', name: '致命大招', desc: '按住 X 键 或 鼠标右键 蓄力\n蓄满后松开释放大招', event: 'ultimate', btn: 'x' as const },
     { id: 'dash', name: '闪避冲刺', desc: '按下 C 键 或 空格键\n高速位移闪避', event: 'dash', btn: 'c' as const },
+    { id: 'melee', name: '近战攻击', desc: '靠近敌人后按 V 键\n发起近战攻击造成伤害', event: 'melee', btn: 'v' as const },
     { id: 'wheel-open', name: '武器轮盘·打开', desc: '长按左下角武器按钮\n(约0.5秒)打开轮盘', event: 'wheel-open', btn: 'w' as const },
     { id: 'wheel-select', name: '武器轮盘·选择', desc: '滑动选中任意套件后松手\n激活武器套件效果', event: 'weapon-kit', btn: 'w' as const },
   ];
@@ -1193,7 +1497,14 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    // 步骤 5: 武器轮盘打开
+    // 步骤 5: 近战攻击
+    if (step.id === 'melee') {
+      this.events.once('tutorial-action', (action: string) => {
+        if (action === 'melee') this.tutorialStepDone = true;
+      });
+    }
+
+    // 步骤 6: 武器轮盘打开
     if (step.id === 'wheel-open') {
       if (this.weaponWheelVisible) {
         this.tutorialStepDone = true;
@@ -1221,7 +1532,7 @@ export class GameScene extends Phaser.Scene {
     this.tutorialStepDoneTime = 0;
     this.tutorialHoldTimer = 0;
     this.tutorialStep++;
-    if (this.tutorialStep > 6) {
+    if (this.tutorialStep > 7) {
       this.endTutorial();
     } else {
       this.showKitHint(
@@ -1242,14 +1553,39 @@ export class GameScene extends Phaser.Scene {
     this.tutorialBodyText?.destroy();
     this.tutorialDotsGfx?.destroy();
     this.tutorialSkipBtn?.destroy();
-    this.isPlayerInvincible = false;
     this.gameMode = 'standard';
+    // 清除敌人所有飞行中子弹和必杀技，防止教程结束后瞬间受伤
+    this.clearAllEnemyProjectiles();
+    // 停止敌人蓄力
+    if (this.isEnemyChargingUltimate) {
+      this.isEnemyChargingUltimate = false;
+      this.enemyTrajectoryUI.clear();
+      this.lastEnemyTrajectoryLength = -999;
+    }
     // 恢复敌人
     if (this.enemy && this.enemy.active) {
       this.enemyHp = ENEMY_HP;
       this.enemy.setMaxVelocity(ENEMY_SPEED, ENEMY_SPEED);
     }
+    // 保持无敌状态 2 秒作为缓冲，防止敌人立刻造成伤害
+    this.time.delayedCall(2000, () => {
+      this.isPlayerInvincible = false;
+    });
+    // 实战开始后 3 秒内敌人不蓄力大招
+    this.enemyUltimateDisabledUntil = this.time.now + 3000;
     this.showKitHint('训练完成！开始实战吧', '#00ff88');
+  }
+
+  private clearAllEnemyProjectiles() {
+    [this.enemyBullets, this.enemyUltimates].forEach(group => {
+      group.getChildren().forEach((child: any) => {
+        if (child.active) {
+          this.cleanupBulletEmitters(child as Phaser.Physics.Arcade.Sprite);
+          child.setActive(false).setVisible(false);
+          if (child.body) child.body.enable = false;
+        }
+      });
+    });
   }
 
   private drawTutorialOverlay() {
@@ -1287,15 +1623,15 @@ export class GameScene extends Phaser.Scene {
     this.tutorialTextBg.strokeRoundedRect(GAME_WIDTH / 2 - 200, 8, 400, 100, 8);
 
     // 标题和说明
-    this.tutorialTitleText.setText(`第 ${this.tutorialStep} 步 / 6  —  ${step.name}`);
+    this.tutorialTitleText.setText(`第 ${this.tutorialStep} 步 / 7  —  ${step.name}`);
     this.tutorialBodyText.setText(step.desc);
 
     // 进度点
     this.tutorialDotsGfx.clear();
     const dotY = GAME_HEIGHT - 30;
     const dotSpacing = 20;
-    const startX = GAME_WIDTH / 2 - (5 * dotSpacing) / 2;
-    for (let i = 0; i < 6; i++) {
+    const startX = GAME_WIDTH / 2 - (6 * dotSpacing) / 2;
+    for (let i = 0; i < 7; i++) {
       const dx = startX + i * dotSpacing;
       if (i < stepIdx) {
         this.tutorialDotsGfx.fillStyle(0x00ff88, 1);
@@ -1313,7 +1649,10 @@ export class GameScene extends Phaser.Scene {
     this.tutorialHighlightGfx.lineStyle(3, 0x00e5ff, pulseAlpha);
     this.tutorialHighlightGfx.strokeRect(wx, wy, ww, wh);
     if ((this.tutorialHighlightGfx as any).postFX) {
-      try { (this.tutorialHighlightGfx as any).postFX.addGlow(0x00e5ff, 3, 0, false, 0.1, 8); } catch {}
+      try {
+        (this.tutorialHighlightGfx as any).postFX.clear();
+        (this.tutorialHighlightGfx as any).postFX.addGlow(0x00e5ff, 3, 0, false, 0.1, 8);
+      } catch {}
     }
   }
 
@@ -1327,11 +1666,6 @@ export class GameScene extends Phaser.Scene {
       case 'w': return { x: kl.w.x, y: kl.w.y };
       default: return { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 };
     }
-  }
-
-  private setSniperTimeScale(scale: number) {
-    this.time.timeScale = scale;
-    this.physics.world.timeScale = scale;
   }
 
   private updateWeaponSystem(time: number) {
@@ -1814,6 +2148,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.updateWeaponSystem(time);
+    this.updateSkillSystem(time);
+    this.updateWindBurst(time);
     this.updateKitVisuals(time, delta);
 
     this.frameCount++;
@@ -1843,8 +2179,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     // 视觉上的平滑持续自转
-    // 角色自转：狙击套件时随 timeScale 线性减速（delta 本身已受 timeScale 影响）
-    const rotScale = this.sniperKitActive ? this.time.timeScale : 1.0;
+    // 角色自转：狙击时停时随慢放倍率线性减速（风爆自转维持原速）
+    const rotScale = this.sniperKitActive ? this.currentSniperTimeScale : 1.0;
     if (this.player && this.player.active) {
       this.player.rotation += 0.08 * (delta / 16) * rotScale;
     }
@@ -1943,7 +2279,7 @@ export class GameScene extends Phaser.Scene {
       // 连发修改器 / 冲锋套件 / 连续闪避：缩短射击间隔
       if (!this.isNormalAttackDisabled) {
         const chargeActive = this.activeKit === 'charge' && time < this.kitEffectEndTime;
-        const effectiveFireRate = chargeActive ? CHARGE_KIT_FIRE_RATE : FIRE_RATE;
+        const effectiveFireRate = (chargeActive ? CHARGE_KIT_FIRE_RATE : FIRE_RATE) * this.fireIntervalMult;
         const canRapidFire = this.modRapidFire || (this.isDashing && this.comboDashCount > 1);
         if (canRapidFire || time - this.lastFired > effectiveFireRate) {
           this.fireNormal();
@@ -1961,6 +2297,28 @@ export class GameScene extends Phaser.Scene {
     // 弹反判定 (键盘 V 键)
     if (this.vKey && Phaser.Input.Keyboard.JustDown(this.vKey)) {
       this.startParry();
+    }
+
+    // 技能轮盘 (键盘，默认 Q)
+    if (this.skillKey) {
+      if (Phaser.Input.Keyboard.JustDown(this.skillKey) && !this.skillBtnPressed) {
+        if (time >= this.skillCooldownEnd) {
+          this.skillBtnPressed = true;
+          this.skillBtnPressTime = time;
+          this.skillBtnPointer = this.input.activePointer;
+          this.skillKeyTriggered = true;
+        }
+      }
+      if (this.skillKeyTriggered) {
+        if (!this.skillKey.isDown) {
+          // 键已释放：激活或取消
+          if (this.skillWheelVisible && this.skillHoveredSlot >= 0) {
+            this.activateSkill(this.SKILLS[this.skillHoveredSlot].key);
+          }
+          this.unloadSkillWheel();
+          this.skillKeyTriggered = false;
+        }
+      }
     }
 
     // 更新弹反盾牌弧线绘制
@@ -2059,7 +2417,7 @@ export class GameScene extends Phaser.Scene {
 
       if (chargeDuration >= 400 && !this.chargeCompleteSoundPlayed) {
         this.chargeCompleteSoundPlayed = true;
-        this.playChargeCompleteSound();
+        playSFX(this, SFX_KEYS.chargeComplete[0], { volume: 0.8 });
       }
 
       const trajProgress = this.sniperKitActive
@@ -2137,12 +2495,13 @@ export class GameScene extends Phaser.Scene {
       const target = 1.0 - eased * 0.988; // 最低 ≈ 0.012
       this.currentSniperTimeScale += (target - this.currentSniperTimeScale) * 0.15;
     }
-    this.setSniperTimeScale(this.currentSniperTimeScale);
-  }
 
-  private setSniperTimeScale(scale: number) {
-    this.time.timeScale = scale;
-    this.physics.world.timeScale = scale;
+    // 直接改速度：每帧按倍率比例缩放双方子弹速度（等效原 physics.timeScale，但不拖慢其他逻辑）
+    if (this.lastSniperSlowMult !== this.currentSniperTimeScale) {
+      const ratio = this.currentSniperTimeScale / this.lastSniperSlowMult;
+      this.scaleBulletVelocities(ratio);
+      this.lastSniperSlowMult = this.currentSniperTimeScale;
+    }
   }
 
   private enterSniperStage1() {
@@ -2199,7 +2558,6 @@ export class GameScene extends Phaser.Scene {
     this.sniperSpeedMult = SNIPER_SPEED_MULT_STAGE3;
     // 直接推到底：子弹、旋转、物理近乎冻结
     this.currentSniperTimeScale = 0.015;
-    this.setSniperTimeScale(0.015);
     // 保持二段暗角，热成像遮罩平滑淡入
     this.thermalScopeSprite.setVisible(true).setAlpha(0);
     this.enemyGlowSprite.setVisible(true);
@@ -2223,10 +2581,12 @@ export class GameScene extends Phaser.Scene {
     this.sniperKitActive = false;
     this.sniperKitStage = 0;
     this.sniperSpeedMult = 1.0;
-    this.currentSniperTimeScale = 1.0;
     this.sniperStage2Alpha = 0;
     this.sniperStage3Alpha = 0;
-    this.setSniperTimeScale(1);
+    // 恢复场上剩余子弹到原速（先恢复再复位倍率）
+    this.scaleBulletVelocities(1 / this.currentSniperTimeScale);
+    this.lastSniperSlowMult = 1.0;
+    this.currentSniperTimeScale = 1.0;
     if (this.isCinematicFocus) {
       this.isCinematicFocus = false;
     }
@@ -2453,74 +2813,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private playChargeCompleteSound() {
-    try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
-      
-      // 创建白噪声 buffer 用于模拟摩擦声
-      const bufferSize = ctx.sampleRate * 0.2;
-      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const output = noiseBuffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        output[i] = Math.random() * 2 - 1;
-      }
-
-      const playMechanicalClick = (time: number, freq: number, duration: number) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(freq, time);
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.1, time + duration);
-        
-        gain.gain.setValueAtTime(0, time);
-        gain.gain.linearRampToValueAtTime(0.4, time + duration * 0.05);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
-        
-        osc.start(time);
-        osc.stop(time + duration);
-      };
-
-      const playMetallicSlide = (time: number, startFreq: number, endFreq: number, duration: number) => {
-        const noiseSource = ctx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-        
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.Q.value = 20; // 高 Q 值产生金属共鸣感
-        filter.frequency.setValueAtTime(startFreq, time);
-        filter.frequency.linearRampToValueAtTime(endFreq, time + duration);
-        
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(0, time);
-        gain.gain.linearRampToValueAtTime(0.8, time + duration * 0.2);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
-        
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(ctx.destination);
-        
-        noiseSource.start(time);
-        noiseSource.stop(time + duration);
-      };
-      
-      const now = ctx.currentTime;
-      // 1. 向后拉栓：金属滑动声 + 轻微的清脆卡扣声
-      playMetallicSlide(now, 1200, 2500, 0.05);
-      playMechanicalClick(now + 0.03, 1800, 0.04);
-      
-      // 2. 向前推回并锁定：向下的金属滑动声 + 沉重的机械锁定声
-      playMetallicSlide(now + 0.07, 2500, 800, 0.06);
-      playMechanicalClick(now + 0.11, 400, 0.08);
-
-    } catch (e) {
-      console.warn('AudioContext not supported');
-    }
-  }
 
   private movePlayer(delta: number) {
     if (this.isPlayerKnockedBack) return;
@@ -2561,7 +2853,10 @@ export class GameScene extends Phaser.Scene {
     if (this.isEnemyChargingUltimate && this.isPlayerMarked && this.isEnemyAimLocked) {
       targetMaxSpeed = Math.min(targetMaxSpeed, PLAYER_SPEED * 0.4);
     }
-    
+
+    // 风爆慢放：直接缩放移动目标速度（覆盖上方所有分支）
+    targetMaxSpeed *= this.slowMult;
+
     // 使用 delta 实现帧率无关的平滑插值
     this.currentPlayerMaxSpeed += (targetMaxSpeed - this.currentPlayerMaxSpeed) * 0.008 * delta;
     this.player.setMaxVelocity(this.currentPlayerMaxSpeed, this.currentPlayerMaxSpeed);
@@ -2587,8 +2882,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (vx !== 0 || vy !== 0) {
-      // 当有方向输入时，设置加速度并在一定程度上改变朝向
-      this.player.setAcceleration(vx * PLAYER_ACCEL, vy * PLAYER_ACCEL);
+      // 当有方向输入时，设置加速度并在一定程度上改变朝向（风爆慢放时同步缩放）
+      this.player.setAcceleration(vx * PLAYER_ACCEL * this.slowMult, vy * PLAYER_ACCEL * this.slowMult);
       if (!this.input.activePointer.isDown) {
         const moveAngle = Math.atan2(vy, vx);
         this.playerAimAngle = Phaser.Math.Angle.RotateTo(this.playerAimAngle, moveAngle, 0.15);
@@ -2611,8 +2906,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // 狙击套件时停：激活期间 + 发射后 300ms 保持冻结，防止敌人闪避无敌
-    if (this.sniperKitActive || this.time.now < this.sniperFreezeUntil) {
+    // 狙击套件时停 / 风爆僵直：冻结敌人
+    if (this.sniperKitActive || this.time.now < this.sniperFreezeUntil || this.time.now < (this.enemy.getData('stunUntil') || 0)) {
       this.enemy.setAcceleration(0, 0);
       this.enemy.setVelocity(0, 0);
       return;
@@ -2701,11 +2996,14 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // 风爆慢放：直接缩放敌人移动目标速度
+    targetSpeed *= this.slowMult;
+
     // 平滑过渡敌人最大速度
     this.currentEnemyMaxSpeed += (targetSpeed - this.currentEnemyMaxSpeed) * 0.01 * delta;
     this.enemy.setMaxVelocity(this.currentEnemyMaxSpeed, this.currentEnemyMaxSpeed);
 
-    this.enemy.setAcceleration(Math.cos(targetAngle) * ENEMY_ACCEL, Math.sin(targetAngle) * ENEMY_ACCEL);
+    this.enemy.setAcceleration(Math.cos(targetAngle) * ENEMY_ACCEL * this.slowMult, Math.sin(targetAngle) * ENEMY_ACCEL * this.slowMult);
   }
 
   private createEnemyDashTrail() {
@@ -2745,10 +3043,11 @@ export class GameScene extends Phaser.Scene {
     const angle = Phaser.Math.Angle.Between(this.enemy.x, this.enemy.y, this.player.x, this.player.y);
     const dodgeDir = Math.random() > 0.5 ? 1 : -1;
     const dashAngle = angle + (Math.PI / 2) * dodgeDir;
-    
-    this.enemy.setMaxVelocity(DASH_SPEED, DASH_SPEED);
-    this.enemy.setVelocity(Math.cos(dashAngle) * DASH_SPEED, Math.sin(dashAngle) * DASH_SPEED);
-    this.currentEnemyMaxSpeed = DASH_SPEED;
+    const dashSpeed = DASH_SPEED * 0.67 * this.slowMult; // 敌人冲刺比玩家慢，减少瞬移感；风爆慢放同步缩放
+
+    this.enemy.setMaxVelocity(dashSpeed, dashSpeed);
+    this.enemy.setVelocity(Math.cos(dashAngle) * dashSpeed, Math.sin(dashAngle) * dashSpeed);
+    this.currentEnemyMaxSpeed = dashSpeed;
     
     this.enemyDashTrailTimer = null;
     
@@ -2803,10 +3102,13 @@ export class GameScene extends Phaser.Scene {
     const bullet = this.bullets.get(this.player.x, this.player.y) as Phaser.Physics.Arcade.Sprite | null;
     if (!bullet) return;
 
+    playRandom(this, SFX_KEYS.shoot, { volume: 0.5 });
     bullet.enableBody(true, this.player.x, this.player.y, true, true);
     bullet.setTintFill(this.playerBulletColor);
     bullet.setDepth(3);
-    bullet.setVelocity(Math.cos(angle) * BULLET_SPEED, Math.sin(angle) * BULLET_SPEED);
+    const speedMult = (this.windBurstPhase === 'slowmo_aiming' || this.windBurstPhase === 'slowmo_placed')
+      ? WIND_BURST_TIMESCALE : 1;
+    bullet.setVelocity(Math.cos(angle) * BULLET_SPEED * speedMult, Math.sin(angle) * BULLET_SPEED * speedMult);
     bullet.setData('isCompanion', false); // 确保非伴生子弹被明确标记
     
     // 放大对撞命中体，增加双方子弹相撞概率
@@ -2820,6 +3122,8 @@ export class GameScene extends Phaser.Scene {
     let angle = this.playerAimAngle;
     const bullet = this.ultimates.get(this.player.x, this.player.y) as Phaser.Physics.Arcade.Sprite | null;
     if (!bullet) return;
+
+    playRandom(this, SFX_KEYS.ultFire, { volume: 0.8 });
 
     // ----- 关键修复：清除从对象池复用时可能残留的旧发射器 -----
     const oldEmitter = bullet.getData('trailEmitter') as Phaser.GameObjects.Particles.ParticleEmitter;
@@ -2855,7 +3159,7 @@ export class GameScene extends Phaser.Scene {
 
     bullet.enableBody(true, this.player.x, this.player.y, true, true);
     bullet.setDepth(3);
-    const speed = ULTIMATE_SPEED * speedMult;
+    const speed = ULTIMATE_SPEED * speedMult * this.slowMult;
     // 高速弹防止隧穿：等比放大碰撞体
     if (bullet.body) {
       const extra = Math.ceil(speed / 60); // 覆盖一帧的位移量
@@ -2892,11 +3196,11 @@ export class GameScene extends Phaser.Scene {
     coreEmitter = this.add.particles(0, 0, 'ult_line', {
       speed: 0,
       scale: { start: 2.0, end: 1.0 }, // 使用统一缩放，长条矩形会直接整体变小，而不产生非对称形变
-      alpha: { start: 1.0, end: 0.0 },   
-      tint: 0xff0000, 
+      alpha: { start: 1.0, end: 0.0 },
+      tint: 0xff0000,
       blendMode: 'NORMAL',
       lifespan: trailLifespan * 0.9,
-      frequency: 1, 
+      frequency: 1,
       quantity: 3, // 每频发3颗填补高速移动可能产生的位移间隙
       rotate: angleDeg
     });
@@ -2944,11 +3248,14 @@ export class GameScene extends Phaser.Scene {
 
   private enemyFire(time: number) {
     if (!this.player || !this.player.active) return;
-    // 测试模式：敌人不攻击
-    if (this.gameMode === 'test') return;
+    // 测试/教程模式：敌人不攻击
+    if (this.gameMode === 'test' || this.gameMode === 'tutorial') return;
 
-    // 检查必杀技蓄力状态
-    if (!this.isEnemyChargingUltimate && (time - this.lastEnemyUltimateFired >= ENEMY_ULTIMATE_FIRE_RATE * this.diffFireRateMult)) {
+    // 风爆僵直：无法攻击
+    if (this.time.now < (this.enemy.getData('stunUntil') || 0)) return;
+
+    // 检查必杀技蓄力状态（实战开始 3 秒内禁止）
+    if (!this.isEnemyChargingUltimate && time >= this.enemyUltimateDisabledUntil && (time - this.lastEnemyUltimateFired >= ENEMY_ULTIMATE_FIRE_RATE * this.diffFireRateMult * this.fireIntervalMult)) {
       this.isEnemyChargingUltimate = true;
       this.enemyChargeStartTime = time;
       this.playerMarkPendingRemove = false;
@@ -2969,7 +3276,7 @@ export class GameScene extends Phaser.Scene {
       
       if (chargeDuration >= 400 && !this.enemyChargeCompleteSoundPlayed) {
         this.enemyChargeCompleteSoundPlayed = true;
-        this.playChargeCompleteSound();
+        playSFX(this, SFX_KEYS.chargeComplete[0], { volume: 0.8 });
       }
       
       this.drawEnemyTrajectory(this.enemyAimAngle, progress);
@@ -3003,16 +3310,20 @@ export class GameScene extends Phaser.Scene {
     const angle = Phaser.Math.Angle.Between(this.enemy.x, this.enemy.y, targetX, targetY);
 
     // 普通攻击
-    if (time - this.lastEnemyFired < ENEMY_FIRE_RATE * this.diffFireRateMult) return;
+    if (time - this.lastEnemyFired < ENEMY_FIRE_RATE * this.diffFireRateMult * this.fireIntervalMult) return;
     this.lastEnemyFired = time;
     
     const bullet = this.enemyBullets.get(this.enemy.x, this.enemy.y) as Phaser.Physics.Arcade.Sprite | null;
     if (!bullet) return;
-    
+
+    playRandom(this, SFX_KEYS.enemyShoot, { volume: 0.5 });
     bullet.enableBody(true, this.enemy.x, this.enemy.y, true, true);
     bullet.setDepth(3);
     bullet.setScale(1); // 恢复普攻大小
-    bullet.setVelocity(Math.cos(angle) * ENEMY_BULLET_SPEED * this.diffSpeedMult, Math.sin(angle) * ENEMY_BULLET_SPEED * this.diffSpeedMult);
+    bullet.setVelocity(
+      Math.cos(angle) * ENEMY_BULLET_SPEED * this.diffSpeedMult * this.slowMult,
+      Math.sin(angle) * ENEMY_BULLET_SPEED * this.diffSpeedMult * this.slowMult,
+    );
     // 放大对撞命中体，增加双方子弹相撞概率
     if (bullet.body) {
       bullet.body.setSize(ENEMY_BULLET_SIZE + 14, ENEMY_BULLET_SIZE + 14).setOffset(-7, -7);
@@ -3023,10 +3334,14 @@ export class GameScene extends Phaser.Scene {
     const angle = this.enemyAimAngle;
     const ultimate = this.enemyUltimates.get(this.enemy.x, this.enemy.y) as Phaser.Physics.Arcade.Sprite | null;
     if (ultimate) {
+      playRandom(this, SFX_KEYS.ultFire, { volume: 0.7 });
       ultimate.enableBody(true, this.enemy.x, this.enemy.y, true, true);
       ultimate.setDepth(3);
       ultimate.setScale(2.5); // 放大表示必杀技
-      ultimate.setVelocity(Math.cos(angle) * ENEMY_ULTIMATE_SPEED, Math.sin(angle) * ENEMY_ULTIMATE_SPEED);
+      ultimate.setVelocity(
+        Math.cos(angle) * ENEMY_ULTIMATE_SPEED * this.slowMult,
+        Math.sin(angle) * ENEMY_ULTIMATE_SPEED * this.slowMult,
+      );
       
       // 敌人发射必杀打击感
       this.cameras.main.shake(200, 0.03);
@@ -3176,9 +3491,10 @@ export class GameScene extends Phaser.Scene {
     this.isNormalAttackDisabled = true;
     this.normalAttackDisableEndTime = this.time.now + 400;
     this.parryCooldown = this.time.now + 400;
-    
+
     this.playerMeleeHitTime = this.time.now;
-    
+    playRandom(this, SFX_KEYS.impact, { volume: 0.8 }); // 近战挥击
+
     // 检查是否发生拼刀 (Clash)
     if (Math.abs(this.playerMeleeHitTime - this.enemyMeleeHitTime) < 150 || this.isEnemyMeleeAttacking) {
       this.handleMeleeClash();
@@ -3246,6 +3562,8 @@ export class GameScene extends Phaser.Scene {
     this.lastEnemyMeleeTime = this.time.now;
     this.enemyMeleeHitTime = this.time.now;
 
+    playRandom(this, SFX_KEYS.impact, { volume: 0.45 }); // 敌人近战挥击（略轻于玩家）
+
     if (Math.abs(this.enemyMeleeHitTime - this.playerMeleeHitTime) < 150 || this.isNormalAttackDisabled) {
       this.isEnemyMeleeAttacking = false;
       this.handleMeleeClash();
@@ -3305,6 +3623,7 @@ export class GameScene extends Phaser.Scene {
 
   private handleMeleeClash() {
     if (!this.player || !this.enemy) return;
+    playRandom(this, SFX_KEYS.impact, { volume: 0.7 });
     const midX = (this.player.x + this.enemy.x) / 2;
     const midY = (this.player.y + this.enemy.y) / 2;
 
@@ -3376,8 +3695,10 @@ export class GameScene extends Phaser.Scene {
     
     // 如果敌人在极限闪避buff期，则无敌
     if (this.hasEnemyPerfectDodged && this.enemyPerfectDodgeBuff) {
-      return; 
+      return;
     }
+
+    playRandom(this, SFX_KEYS.impact, { volume: 0.4 });
 
     // 普攻命中敌人，重置玩家闪避冷却，允许连续闪避（回归原版无条件刷新手感）
     this.lastDashTime = 0;
@@ -3452,7 +3773,10 @@ export class GameScene extends Phaser.Scene {
         // 反弹大招回玩家
         if (bullet && bullet.body && this.player && this.player.active) {
           const backAngle = Phaser.Math.Angle.Between(bullet.x, bullet.y, this.player.x, this.player.y);
-          bullet.setVelocity(Math.cos(backAngle) * ENEMY_ULTIMATE_SPEED * 1.5, Math.sin(backAngle) * ENEMY_ULTIMATE_SPEED * 1.5);
+          bullet.setVelocity(
+            Math.cos(backAngle) * ENEMY_ULTIMATE_SPEED * 1.5 * this.slowMult,
+            Math.sin(backAngle) * ENEMY_ULTIMATE_SPEED * 1.5 * this.slowMult,
+          );
           bullet.setData('isReflected', true);
         }
         return; // 不受伤害、不击退
@@ -3531,7 +3855,8 @@ export class GameScene extends Phaser.Scene {
     if (!this.hasPerfectDodged) {
       this.hasPerfectDodged = true;
       this.perfectDodgeBuff = true;
-      
+      playSFX(this, SFX_KEYS.chargeComplete[0], { volume: 0.8, detune: 300 }); // 完美闪避：清脆"叮"
+
       const text = this.add.text(this.player.x, this.player.y - 40, 'PERFECT DODGE!', {
         fontFamily: 'monospace', fontSize: '24px', color: '#00FFFF', fontStyle: 'bold'
       }).setOrigin(0.5).setDepth(200);
@@ -3558,6 +3883,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.isPlayerInvincible || this.gameOver) return;
+    playRandom(this, SFX_KEYS.impact, { volume: 0.7 });
 
     const bullet = (obj1 === this.player ? obj2 : obj1) as Phaser.Physics.Arcade.Sprite;
     
@@ -3607,6 +3933,7 @@ export class GameScene extends Phaser.Scene {
     this.isParrying = true;
     this.parryStartTime = this.time.now;
     this.parrySuccess = false;
+    playRandom(this, SFX_KEYS.impact, { volume: 0.7 });
     
     // 弹反动作视觉提示：弧线特效
     if (this.enemy && this.enemy.active) {
@@ -3670,6 +3997,7 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.flash(200, 255, 255, 255); // 白闪
         this.cameras.main.shake(300, 0.06); // 更强烈的震屏
         this.hitStop(150); // 更强烈的顿帧
+        playSFX(this, SFX_KEYS.parryDeflect[0], { volume: 0.8 });
         
         // 极限弹反：大招沿着弧线飞回敌人当前（或弹反瞬间的）位置
         if (bullet && bullet.body && this.enemy && this.enemy.active) {
@@ -3765,6 +4093,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.isPlayerInvincible || this.gameOver) return;
+    playRandom(this, SFX_KEYS.impact, { volume: 0.7 });
     
     // 给玩家施加刚被命中标记
     this.isPlayerMarked = true;
@@ -3790,6 +4119,7 @@ export class GameScene extends Phaser.Scene {
   private killPlayer() {
     if (!this.player || !this.player.active) return;
     if (this.isPlayerInvincible || this.gameOver) return;
+    playSFX(this, SFX_KEYS.playerDeath[0], { volume: 1.0 });
 
     // 受到攻击时打断必杀技蓄力
     if (this.isCharging) {
@@ -3802,6 +4132,10 @@ export class GameScene extends Phaser.Scene {
         this.sniperEnemyHighlightGfx.clear();
         this.cleanupSniperKit();
       }
+    }
+    // 风爆期间死亡：清理风爆状态
+    if (this.windBurstPhase !== 'idle') {
+      this.cleanupWindBurst();
     }
     if (this.isEnemyChargingUltimate) {
       this.isEnemyChargingUltimate = false;
@@ -3827,9 +4161,15 @@ export class GameScene extends Phaser.Scene {
   private updateDuplicateBosses(delta: number) {
     for (const dup of this.duplicateBosses) {
       if (!dup.active || !this.player || !this.player.active) continue;
-      // 复制 BOSS 追击玩家
+      // 风爆僵直冻结
+      if (this.time.now < (dup.getData('stunUntil') || 0)) {
+        dup.setAcceleration(0, 0);
+        dup.setVelocity(0, 0);
+        continue;
+      }
+      // 复制 BOSS 追击玩家（风爆慢放时同步缩放）
       const angle = Phaser.Math.Angle.Between(dup.x, dup.y, this.player.x, this.player.y);
-      dup.setAcceleration(Math.cos(angle) * ENEMY_ACCEL * 0.5, Math.sin(angle) * ENEMY_ACCEL * 0.5);
+      dup.setAcceleration(Math.cos(angle) * ENEMY_ACCEL * 0.5 * this.slowMult, Math.sin(angle) * ENEMY_ACCEL * 0.5 * this.slowMult);
     }
   }
 
@@ -3841,10 +4181,16 @@ export class GameScene extends Phaser.Scene {
 
     for (const m of minions) {
       if (!this.player || !this.player.active) continue;
-      // 追击玩家
+      // 风爆僵直冻结
+      if (this.time.now < (m.getData('stunUntil') || 0)) {
+        m.setAcceleration(0, 0);
+        m.setVelocity(0, 0);
+        continue;
+      }
+      // 追击玩家（风爆慢放时同步缩放）
       const angle = Phaser.Math.Angle.Between(m.x, m.y, this.player.x, this.player.y);
-      m.setAcceleration(Math.cos(angle) * ENEMY_ACCEL * 0.6, Math.sin(angle) * ENEMY_ACCEL * 0.6);
-      m.setMaxVelocity(MINION_SPEED * speedMult, MINION_SPEED * speedMult);
+      m.setAcceleration(Math.cos(angle) * ENEMY_ACCEL * 0.6 * this.slowMult, Math.sin(angle) * ENEMY_ACCEL * 0.6 * this.slowMult);
+      m.setMaxVelocity(MINION_SPEED * speedMult * this.slowMult, MINION_SPEED * speedMult * this.slowMult);
 
       // 更新血条跟随
       if ((m as any).hpBar && (m as any).hpBar.active) {
@@ -3854,16 +4200,17 @@ export class GameScene extends Phaser.Scene {
       // 射击：每个小兵独立计时
       const dist = Phaser.Math.Distance.Between(m.x, m.y, this.player.x, this.player.y);
       const lastFired = (m as any)._lastFired || 0;
-      if (dist < 600 && time - lastFired > MINION_FIRE_RATE * frMult) {
+      if (dist < 600 && time - lastFired > MINION_FIRE_RATE * frMult * this.fireIntervalMult) {
         (m as any)._lastFired = time;
         const bullet = this.enemyBullets.get(m.x, m.y) as Phaser.Physics.Arcade.Sprite | null;
         if (bullet) {
+          playRandom(this, SFX_KEYS.shoot, { volume: 0.3 });
           bullet.enableBody(true, m.x, m.y, true, true);
           bullet.setDepth(3);
           bullet.setScale(0.7);
           bullet.setVelocity(
-            Math.cos(angle) * MINION_BULLET_SPEED * speedMult,
-            Math.sin(angle) * MINION_BULLET_SPEED * speedMult
+            Math.cos(angle) * MINION_BULLET_SPEED * speedMult * this.slowMult,
+            Math.sin(angle) * MINION_BULLET_SPEED * speedMult * this.slowMult
           );
         }
       }
@@ -3891,6 +4238,8 @@ export class GameScene extends Phaser.Scene {
     const bossName = { dodge: '闪避型', parry: '弹反型', split: '分裂型' }[this.bossType];
 
     const minionCount = MINIONS_PER_WAVE_BASE + Math.floor((this.waveNumber - 1) * MINIONS_PER_WAVE_INCREASE);
+
+    playRandom(this, SFX_KEYS.ultFire, { volume: 0.55 }); // 波次开始公告音
 
     // 波次公告
     const announce = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, `第 ${this.waveNumber} 波`, {
@@ -3956,6 +4305,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnBoss() {
+    playSFX(this, SFX_KEYS.ultFire[0], { volume: 0.7, detune: -300 }); // BOSS 出场：低沉等离子音
     // 清理之前的重复 BOSS
     for (const dup of this.duplicateBosses) {
       if (dup && dup.active) dup.destroy();
@@ -4128,6 +4478,7 @@ export class GameScene extends Phaser.Scene {
       this.handlePerfectDodge();
       return;
     }
+    playRandom(this, SFX_KEYS.impact, { volume: 0.7 });
     // 撞到小兵：击退 + 扣血
     const angle = Math.atan2(player.y - minion.y, player.x - minion.x);
     this.applyPlayerKnockback(angle, 800);
@@ -4194,6 +4545,7 @@ export class GameScene extends Phaser.Scene {
       bg.on('pointerover', () => bg.setFillStyle(0x003344));
       bg.on('pointerout', () => bg.setFillStyle(0x111111));
       bg.on('pointerdown', () => {
+        playSFX(this, SFX_KEYS.chargeComplete[0], { volume: 0.6 }); // 选择强化
         this.selectSkill(skill.key);
       });
 
@@ -4245,6 +4597,7 @@ export class GameScene extends Phaser.Scene {
 
   private defeatEnemy() {
     if (this.gameMode === 'tutorial') { this.enemyHp = 9999; return; }
+    playRandom(this, SFX_KEYS.enemyDeath, { volume: 0.8 });
     // 无尽模式：不清除 gameOver，让玩家继续清剩余小兵
     // gameOver 由 showSkillSelection 设置
     if (this.gameMode !== 'endless') {
@@ -4485,7 +4838,11 @@ export class GameScene extends Phaser.Scene {
     let targetX = this.player.x;
     let targetY = this.player.y;
 
-    if (this.isCinematicFocus && this.enemy.active) {
+    if (this.windBurstPhase !== 'idle') {
+      // 风爆技能启用：镜头对准双方中点，保证都可见
+      targetX = (this.player.x + this.enemy.x) / 2;
+      targetY = (this.player.y + this.enemy.y) / 2;
+    } else if (this.isCinematicFocus && this.enemy.active) {
       // 完美闪避慢放时，镜头聚焦在敌人或者两者中心偏敌人
       targetX = this.enemy.x;
       targetY = this.enemy.y;
@@ -4499,7 +4856,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 简单平滑插值移动摄像机
+    // 简单平滑插值移动摄像机（Phaser zoom 围绕屏幕中心缩放，居中偏移与 zoom 无关）
     const lerpFactor = this.isCinematicFocus ? 0.2 : 0.1;
     this.cameras.main.scrollX += (targetX - GAME_WIDTH / 2 - this.cameras.main.scrollX) * lerpFactor;
     this.cameras.main.scrollY += (targetY - GAME_HEIGHT / 2 - this.cameras.main.scrollY) * lerpFactor;
@@ -4598,6 +4955,7 @@ export class GameScene extends Phaser.Scene {
     this.lastDashTime = this.time.now;
     this.isPlayerInvincible = true;
     this.hasPerfectDodged = false;
+    playSFX(this, SFX_KEYS.dash[0], { volume: 0.5 });
 
     let dashAngle = this.playerAimAngle;
     
@@ -4606,10 +4964,12 @@ export class GameScene extends Phaser.Scene {
       dashAngle = Math.atan2(this.player.body!.velocity.y, this.player.body!.velocity.x);
     }
     
-    const vx = Math.cos(dashAngle) * DASH_SPEED;
-    const vy = Math.sin(dashAngle) * DASH_SPEED;
-    
-    this.player.setMaxVelocity(DASH_SPEED, DASH_SPEED);
+    // 风爆慢放：闪避也接近冻结（无敌帧仍有效）
+    const dashSpeed = DASH_SPEED * this.slowMult;
+    const vx = Math.cos(dashAngle) * dashSpeed;
+    const vy = Math.sin(dashAngle) * dashSpeed;
+
+    this.player.setMaxVelocity(dashSpeed, dashSpeed);
     this.player.setVelocity(vx, vy);
 
     // 添加摄像机短暂变焦增强速度感
@@ -4669,5 +5029,369 @@ export class GameScene extends Phaser.Scene {
         trail.destroy();
       }
     });
+  }
+
+  // ========== 风爆技能 ==========
+
+  /** 当前全局子弹/移动速度慢放乘数（风爆慢放 × 狙击时停） */
+  private get slowMult() {
+    let m = 1;
+    if (this.windBurstPhase === 'slowmo_aiming' || this.windBurstPhase === 'slowmo_placed') m *= WIND_BURST_TIMESCALE;
+    if (this.sniperKitActive) m *= this.currentSniperTimeScale;
+    return m;
+  }
+
+  /** 子弹发射间隔慢放乘数（与速度慢放同步，间隔×1/倍率） */
+  private get fireIntervalMult() {
+    return 1 / this.slowMult;
+  }
+
+  /** 缩放所有活跃子弹的速度（双方） */
+  private scaleBulletVelocities(factor: number) {
+    const groups = [this.bullets, this.ultimates, this.enemyBullets, this.enemyUltimates];
+    for (const group of groups) {
+      if (!group) continue;
+      group.getChildren().forEach((child: any) => {
+        if (child.active && child.body) {
+          child.body.velocity.x *= factor;
+          child.body.velocity.y *= factor;
+        }
+      });
+    }
+  }
+
+  private startWindBurst() {
+    this.windBurstPhase = 'slowmo_aiming';
+    this.skillCooldownEnd = this.time.now + 15000;
+
+    // 慢放子弹速度（手动缩放 velocity，不依赖 timeScale）
+    this.scaleBulletVelocities(WIND_BURST_TIMESCALE);
+
+    // 准心从屏幕中心开始
+    this.windBurstCrosshairX = GAME_WIDTH / 2;
+    this.windBurstCrosshairY = GAME_HEIGHT / 2;
+
+    this.windBurstCrosshairGfx.setVisible(true);
+    this.drawWindBurstCrosshair();
+
+    // 镜头拉远，保证双方角色可见
+    this.tweens.killTweensOf(this.cameras.main);
+    this.tweens.add({
+      targets: this.cameras.main,
+      zoom: WIND_BURST_CAMERA_ZOOM,
+      duration: 400,
+      ease: 'Cubic.easeOut',
+    });
+
+    // 相机绿色闪光
+    this.cameras.main.flash(200, 0, 255, 100);
+
+    // 注册全局 pointerdown 监听
+    this.windBurstPointerHandler = (pointer: Phaser.Input.Pointer) => {
+      if (this.windBurstPhase === 'slowmo_aiming' || this.windBurstPhase === 'slowmo_placed') {
+        this.handleWindBurstTap(pointer.x, pointer.y);
+      }
+    };
+    this.input.on('pointerdown', this.windBurstPointerHandler);
+  }
+
+  private handleWindBurstTap(screenX: number, screenY: number) {
+    if (this.windBurstPhase === 'slowmo_aiming') {
+      // 首次点击：移动准心到目标位置，变红色
+      this.windBurstFirstTapX = screenX;
+      this.windBurstFirstTapY = screenY;
+      this.moveWindBurstCrosshair(screenX, screenY);
+      this.windBurstPhase = 'slowmo_placed';
+    } else if (this.windBurstPhase === 'slowmo_placed') {
+      const dx = screenX - this.windBurstFirstTapX;
+      const dy = screenY - this.windBurstFirstTapY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= WIND_BURST_CONFIRM_DEADZONE) {
+        // 确认释放：准心屏幕坐标 → 世界坐标（getWorldPoint 正确包含 zoom 变换）
+        this.windBurstPhase = 'releasing';
+        const camPoint = this.cameras.main.getWorldPoint(this.windBurstCrosshairX, this.windBurstCrosshairY);
+        this.windBurstAoECenterX = camPoint.x;
+        this.windBurstAoECenterY = camPoint.y;
+        this.releaseWindBurst();
+      } else {
+        // 重新定位
+        this.windBurstFirstTapX = screenX;
+        this.windBurstFirstTapY = screenY;
+        this.moveWindBurstCrosshair(screenX, screenY);
+      }
+    }
+  }
+
+  private moveWindBurstCrosshair(x: number, y: number) {
+    this.tweens.killTweensOf(this);
+    this.tweens.add({
+      targets: this,
+      windBurstCrosshairX: x,
+      windBurstCrosshairY: y,
+      duration: 120,
+      ease: 'Cubic.easeOut',
+    });
+  }
+
+  private drawWindBurstCrosshair() {
+    const g = this.windBurstCrosshairGfx;
+    const cx = this.windBurstCrosshairX;
+    const cy = this.windBurstCrosshairY;
+    const isPlaced = this.windBurstPhase === 'slowmo_placed';
+    const color = isPlaced ? WIND_BURST_CROSSHAIR_COLOR_RED : WIND_BURST_CROSSHAIR_COLOR_GREEN;
+
+    g.clear();
+
+    // 内圈 r=16，较粗
+    g.lineStyle(2, color, 0.8);
+    g.strokeCircle(cx, cy, 16);
+
+    // 外圈 r=28，较细
+    g.lineStyle(1.5, color, 0.6);
+    g.strokeCircle(cx, cy, 28);
+
+    // 中心点
+    g.fillStyle(color, 0.9);
+    g.fillCircle(cx, cy, 3);
+
+    // 十字线带中心缺口（类似全息反射式瞄具）
+    g.lineStyle(2, color, 0.85);
+    const gap = 6;
+    const lineLen = 32;
+    g.lineBetween(cx, cy - gap, cx, cy - lineLen);
+    g.lineBetween(cx, cy + gap, cx, cy + lineLen);
+    g.lineBetween(cx - gap, cy, cx - lineLen, cy);
+    g.lineBetween(cx + gap, cy, cx + lineLen, cy);
+
+    // 刻度标记
+    const tickHalf = 3;
+    g.lineStyle(1.5, color, 0.5);
+    g.lineBetween(cx - tickHalf, cy - 29, cx + tickHalf, cy - 29);
+    g.lineBetween(cx - tickHalf, cy + 29, cx + tickHalf, cy + 29);
+    g.lineBetween(cx - 29, cy - tickHalf, cx - 29, cy + tickHalf);
+    g.lineBetween(cx + 29, cy - tickHalf, cx + 29, cy + tickHalf);
+
+    // placed 状态：额外外圈 + 呼吸闪烁
+    if (isPlaced) {
+      g.lineStyle(2.5, color, 0.9);
+      g.strokeCircle(cx, cy, 44);
+
+      if (!this.tweens.getTweensOf(this.windBurstCrosshairGfx).length) {
+        this.tweens.add({
+          targets: this.windBurstCrosshairGfx,
+          alpha: { from: 0.85, to: 1 },
+          duration: 400,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+      }
+    }
+  }
+
+  private releaseWindBurst() {
+    // 隐藏准心
+    this.windBurstCrosshairGfx.setVisible(false);
+    this.windBurstCrosshairGfx.clear();
+    this.tweens.killTweensOf(this.windBurstCrosshairGfx);
+    this.windBurstCrosshairGfx.setAlpha(1);
+
+    // 显示 AoE
+    this.windBurstAoEGfx.setVisible(true);
+    this.windBurstAoeStartTime = this.time.now;
+
+    // 镜头效果
+    this.cameras.main.shake(300, 0.015);
+    this.cameras.main.flash(150, 255, 255, 255);
+    playRandom(this, SFX_KEYS.windBoom, { volume: 0.9 });
+
+    // 施加击退 + 僵直
+    this.performWindBurstKnockback(this.windBurstAoECenterX, this.windBurstAoECenterY);
+  }
+
+  private drawWindBurstAoE(time: number) {
+    const g = this.windBurstAoEGfx;
+    const cx = this.windBurstAoECenterX;
+    const cy = this.windBurstAoECenterY;
+
+    const elapsed = time - this.windBurstAoeStartTime;
+    const progress = Math.min(elapsed / WIND_BURST_AOE_ANIM_DURATION, 1.0);
+
+    g.clear();
+
+    // 三层冲击波：由内到外依次延迟扩散，颜色/线宽/填充各异，强化分层感
+    const layers = [
+      { r: WIND_BURST_AOE_INNER_R, color: 0xffffff, lw: 4, delay: 0 },
+      { r: WIND_BURST_AOE_MIDDLE_R, color: 0x7dfcff, lw: 3.5, delay: 140 },
+      { r: WIND_BURST_AOE_OUTER_R, color: 0x2f7dff, lw: 3, delay: 280 },
+    ];
+
+    for (const layer of layers) {
+      const localElapsed = elapsed - layer.delay;
+      if (localElapsed < 0) continue;
+      const localProgress = Math.min(localElapsed / (WIND_BURST_AOE_ANIM_DURATION - layer.delay), 1.0);
+      const eased = 1 - Math.pow(1 - localProgress, 3); // easeOutCubic
+      const currentR = layer.r * eased;
+
+      // 层内填充，让每层范围一眼可辨
+      g.fillStyle(layer.color, 0.12 * localProgress);
+      g.fillCircle(cx, cy, currentR);
+
+      // 主圈
+      g.lineStyle(layer.lw, layer.color, Math.min(1, 0.35 + localProgress * 0.65));
+      g.strokeCircle(cx, cy, currentR);
+
+      // 扩散到位时的脉冲高亮（该层收尾瞬间闪一下）
+      if (localProgress >= 0.85) {
+        const pulse = (localProgress - 0.85) / 0.15;
+        g.lineStyle(layer.lw + 3, layer.color, 0.7 * (1 - pulse));
+        g.strokeCircle(cx, cy, currentR * (1 + pulse * 0.12));
+      }
+    }
+
+    // 中心闪光点
+    if (progress < 0.3) {
+      const flashAlpha = (1 - progress / 0.3) * 0.8;
+      g.fillStyle(0xffffff, flashAlpha);
+      g.fillCircle(cx, cy, 12 * (1 + progress * 2));
+    }
+  }
+
+  private performWindBurstKnockback(cx: number, cy: number) {
+    const outerR = WIND_BURST_AOE_OUTER_R;
+
+    const knockTarget = (target: Phaser.Physics.Arcade.Sprite) => {
+      if (!target || !target.active) return;
+
+      const dist = Phaser.Math.Distance.Between(cx, cy, target.x, target.y);
+      if (dist > outerR) return;
+
+      playRandom(this, SFX_KEYS.impact, { volume: 0.7 });
+
+      // 方向：从中心穿过敌人，沿直线到第三层外侧
+      const angle = Phaser.Math.Angle.Between(cx, cy, target.x, target.y);
+      const targetX = cx + Math.cos(angle) * outerR;
+      const targetY = cy + Math.sin(angle) * outerR;
+
+      // 击退速度随距离减弱：近→快，远→慢
+      const t = Phaser.Math.Clamp(dist / outerR, 0, 1);
+      const knockDuration = 300 + (1 - t) * 300;
+
+      // 命中僵直：击退结束后 WIND_BURST_STUN_DURATION 内无法移动/攻击/蓄力（只对范围内目标生效）
+      target.setData('stunUntil', this.time.now + knockDuration + WIND_BURST_STUN_DURATION);
+
+      // 主敌人僵直时打断蓄力
+      if (target === this.enemy && this.isEnemyChargingUltimate) {
+        this.isEnemyChargingUltimate = false;
+        this.enemyChargeCompleteSoundPlayed = false;
+        if (this.enemyTrajectoryUI) {
+          this.enemyTrajectoryUI.clear();
+          this.lastEnemyTrajectoryLength = -999;
+        }
+      }
+
+      // 覆盖现有击退
+      this.isEnemyKnockedBack = true;
+      if (this.enemyKnockbackTimer) {
+        this.enemyKnockbackTimer.remove();
+        this.enemyKnockbackTimer = null;
+      }
+
+      target.setAcceleration(0, 0);
+      this.tweens.add({
+        targets: target,
+        x: targetX,
+        y: targetY,
+        duration: knockDuration,
+        ease: 'Cubic.easeOut',
+        onUpdate: () => {
+          if (Math.random() < 0.3 && this.whiteHitEmitter) {
+            this.whiteHitEmitter.explode(1, target.x, target.y);
+          }
+        },
+        onComplete: () => {
+          if (target && target.active) {
+            this.isEnemyKnockedBack = false;
+            target.setMaxVelocity(ENEMY_SPEED * this.diffSpeedMult, ENEMY_SPEED * this.diffSpeedMult);
+            target.setDrag(ENEMY_DRAG, ENEMY_DRAG);
+          }
+        },
+      });
+
+      // 白色闪烁
+      target.setTintFill(0xffffff);
+      this.time.delayedCall(100, () => {
+        if (target && target.active) target.clearTint();
+      });
+    };
+
+    // 击退主敌人
+    if (this.enemy && this.enemy.active) {
+      knockTarget(this.enemy);
+    }
+
+    // 击退小兵
+    if (this.gameMode === 'endless' && this.minions) {
+      const minions = this.minions.getChildren().filter((m: any) => m.active) as Phaser.Physics.Arcade.Sprite[];
+      for (const m of minions) {
+        knockTarget(m);
+      }
+    }
+
+    // 击退分身 BOSS
+    if (this.gameMode === 'endless') {
+      for (const dup of this.duplicateBosses) {
+        knockTarget(dup);
+      }
+    }
+  }
+
+  private cleanupWindBurst() {
+    // 恢复子弹速度
+    this.scaleBulletVelocities(1 / WIND_BURST_TIMESCALE);
+
+    // 恢复镜头
+    this.tweens.killTweensOf(this.cameras.main);
+    this.tweens.add({
+      targets: this.cameras.main,
+      zoom: 1.0,
+      duration: 300,
+      ease: 'Cubic.easeOut',
+    });
+
+    // 清理准心
+    this.windBurstCrosshairGfx.setVisible(false);
+    this.windBurstCrosshairGfx.clear();
+    this.tweens.killTweensOf(this.windBurstCrosshairGfx);
+    this.windBurstCrosshairGfx.setAlpha(1);
+
+    // 清理 AoE
+    this.windBurstAoEGfx.setVisible(false);
+    this.windBurstAoEGfx.clear();
+    this.tweens.killTweensOf(this.windBurstAoEGfx);
+
+    // 移除指针监听
+    if (this.windBurstPointerHandler) {
+      this.input.off('pointerdown', this.windBurstPointerHandler);
+      this.windBurstPointerHandler = null;
+    }
+
+    // 重置状态
+    this.windBurstPhase = 'idle';
+  }
+
+  private updateWindBurst(time: number) {
+    if (this.windBurstPhase === 'idle') return;
+
+    if (this.windBurstPhase === 'slowmo_aiming' || this.windBurstPhase === 'slowmo_placed') {
+      this.drawWindBurstCrosshair();
+    }
+
+    if (this.windBurstPhase === 'releasing') {
+      this.drawWindBurstAoE(time);
+      if (time - this.windBurstAoeStartTime >= WIND_BURST_AOE_ANIM_DURATION) {
+        this.cleanupWindBurst();
+      }
+    }
   }
 }

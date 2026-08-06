@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { COLORS, GAME_HEIGHT, GAME_WIDTH } from '../constants';
+import { uiClick } from '../sfx';
 
 // 暂停场景：覆盖层，提供继续游戏与返回主菜单
 export class PauseScene extends Phaser.Scene {
@@ -24,11 +25,13 @@ export class PauseScene extends Phaser.Scene {
     const menuBtn = this.makeButton(GAME_HEIGHT / 2 + 60, '返 回 主 菜 单', '#FF3333');
 
     resumeBtn.on('pointerdown', () => {
+      uiClick(this);
       this.scene.resume('GameScene');
       this.scene.stop();
     });
 
     menuBtn.on('pointerdown', () => {
+      uiClick(this);
       this.scene.stop('GameScene');
       this.scene.start('StartScene');
     });

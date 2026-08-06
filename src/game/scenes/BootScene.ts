@@ -2,14 +2,17 @@ import Phaser from 'phaser';
 import { ASSET_KEYS } from '../assets';
 import { COLORS, PLAYER_SIZE, ENEMY_SIZE, BULLET_SIZE, ENEMY_BULLET_SIZE, ULTIMATE_SIZE } from '../constants';
 import { regeneratePlayerSkinTexture } from '../skinConfig';
+import { applyMute, loadAudioFiles } from '../sfx';
 
-// 启动场景：生成所有纯色像素纹理，然后进入开始页面
+// 启动场景：生成所有纯色像素纹理，然后进入开始页面（音效在启动即后台非阻塞加载，越早越好）
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('BootScene');
   }
 
   create() {
+    // 尽早开始后台加载音效：菜单出现时音频多半已就绪，首按即有声音
+    loadAudioFiles(this);
     // 全面禁用浏览器默认手势：右键菜单、iOS 手势、文本选择、触控滚动
     document.addEventListener('contextmenu', (e) => e.preventDefault(), true);
     if (this.game.canvas) {
@@ -21,6 +24,8 @@ export class BootScene extends Phaser.Scene {
       cv.addEventListener('gestureend', (e) => e.preventDefault());
       cv.style.touchAction = 'none';
     }
+    // 同步静音状态（移动端解锁由 Phaser Sound Manager 首次手势自动处理）
+    applyMute(this);
     this.generateTextures();
     this.scene.start('StartScene');
   }

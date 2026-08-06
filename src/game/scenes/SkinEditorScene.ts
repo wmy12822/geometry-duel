@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../constants';
+import { uiClick } from '../sfx';
 import { SKIN_GRID, SKIN_PALETTE, SKIN_TRANSPARENT, loadSkin, saveSkin, SkinData } from '../skinConfig';
 
 const NEON_BLUE = 0x00e5ff;
@@ -42,6 +43,11 @@ export class SkinEditorScene extends Phaser.Scene {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.handleDraw(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
       if (p.isDown) this.handleDraw(p);
+    });
+
+    // 按钮点击音（画笔涂色区 useHandCursor=false，不会误响）
+    this.input.on('gameobjectdown', (obj: Phaser.GameObjects.GameObject) => {
+      if ((obj as { input?: { useHandCursor?: boolean } }).input?.useHandCursor) uiClick(this);
     });
 
     this.input.keyboard?.on('keydown-ESC', () => this.backToStart());
