@@ -33,7 +33,7 @@ jobs:
 
       - name: Build release APK
         env:
-          KEYSTORE: android/keystore.jks
+          KEYSTORE: keystore.jks
           KS_PASS: geometry123
           KEY_ALIAS: geometry
           KEY_PASS: geometry123
